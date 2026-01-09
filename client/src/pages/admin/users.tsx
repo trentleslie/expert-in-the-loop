@@ -51,7 +51,7 @@ function UserRow({ user, onUpdate }: { user: UserWithStats; onUpdate: () => void
   });
 
   return (
-    <TableRow>
+    <TableRow data-testid={`row-user-${user.id}`}>
       <TableCell>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
@@ -60,13 +60,13 @@ function UserRow({ user, onUpdate }: { user: UserWithStats; onUpdate: () => void
             </span>
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground truncate">{user.displayName}</p>
-            <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+            <p className="text-sm font-medium text-foreground truncate" data-testid={`text-user-name-${user.id}`}>{user.displayName}</p>
+            <p className="text-xs text-muted-foreground truncate" data-testid={`text-user-email-${user.id}`}>{user.email}</p>
           </div>
         </div>
       </TableCell>
       <TableCell>
-        <Badge variant={user.role === "admin" ? "default" : "secondary"}>
+        <Badge variant={user.role === "admin" ? "default" : "secondary"} data-testid={`badge-user-role-${user.id}`}>
           {user.role === "admin" ? (
             <><Shield className="w-3 h-3 mr-1" /> Admin</>
           ) : (
@@ -74,7 +74,7 @@ function UserRow({ user, onUpdate }: { user: UserWithStats; onUpdate: () => void
           )}
         </Badge>
       </TableCell>
-      <TableCell className="font-mono text-sm">
+      <TableCell className="font-mono text-sm" data-testid={`text-user-votes-${user.id}`}>
         {user.voteCount ?? 0}
       </TableCell>
       <TableCell className="text-sm text-muted-foreground">

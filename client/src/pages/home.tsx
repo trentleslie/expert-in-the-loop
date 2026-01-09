@@ -41,11 +41,11 @@ function CampaignCard({ campaign }: { campaign: CampaignWithStats }) {
   };
 
   return (
-    <Card className="border-card-border hover-elevate active-elevate-2 transition-all">
+    <Card className="border-card-border hover-elevate active-elevate-2 transition-all" data-testid={`card-campaign-${campaign.id}`}>
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
-            <CardTitle className="text-base font-medium truncate">
+            <CardTitle className="text-base font-medium truncate" data-testid={`text-campaign-name-${campaign.id}`}>
               {campaign.name}
             </CardTitle>
             {campaign.description && (
@@ -57,6 +57,7 @@ function CampaignCard({ campaign }: { campaign: CampaignWithStats }) {
           <Badge 
             variant="outline" 
             className={`flex-shrink-0 text-xs ${getStatusColor(campaign.status)}`}
+            data-testid={`badge-campaign-status-${campaign.id}`}
           >
             {campaign.status}
           </Badge>
@@ -98,15 +99,17 @@ function StatsCard({
   icon: Icon, 
   label, 
   value, 
-  subtext 
+  subtext,
+  testId
 }: { 
   icon: React.ElementType; 
   label: string; 
   value: string | number; 
   subtext?: string;
+  testId?: string;
 }) {
   return (
-    <Card className="border-card-border">
+    <Card className="border-card-border" data-testid={testId}>
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
           <div className="p-2 rounded-md bg-primary/10">
@@ -114,7 +117,7 @@ function StatsCard({
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs text-muted-foreground">{label}</p>
-            <p className="text-xl font-semibold text-foreground mt-0.5">{value}</p>
+            <p className="text-xl font-semibold text-foreground mt-0.5" data-testid={testId ? `${testId}-value` : undefined}>{value}</p>
             {subtext && (
               <p className="text-xs text-muted-foreground mt-1">{subtext}</p>
             )}
@@ -185,18 +188,21 @@ export default function HomePage() {
                 label="Total Contributions"
                 value={stats?.totalVotes || 0}
                 subtext="votes submitted"
+                testId="card-stat-contributions"
               />
               <StatsCard
                 icon={TrendingUp}
                 label="Agreement Rate"
                 value={stats?.agreementRate != null ? `${Math.round(stats.agreementRate * 100)}%` : "N/A"}
                 subtext="with consensus"
+                testId="card-stat-agreement"
               />
               <StatsCard
                 icon={BarChart3}
                 label="Active Campaigns"
                 value={activeCampaigns.length}
                 subtext="available to review"
+                testId="card-stat-campaigns"
               />
             </>
           )}

@@ -49,23 +49,23 @@ function EntityCard({
   metadata?: Record<string, unknown> | null;
 }) {
   return (
-    <Card className="border-card-border h-full flex flex-col">
+    <Card className="border-card-border h-full flex flex-col" data-testid={`card-entity-${type}`}>
       <CardHeader className="pb-3 flex-shrink-0">
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="text-xs font-medium uppercase tracking-wide">
+          <Badge variant="outline" className="text-xs font-medium uppercase tracking-wide" data-testid={`badge-entity-type-${type}`}>
             {type}
           </Badge>
-          <span className="text-sm text-muted-foreground truncate">
+          <span className="text-sm text-muted-foreground truncate" data-testid={`text-dataset-${type}`}>
             {dataset}
           </span>
         </div>
       </CardHeader>
       <CardContent className="flex-1 flex flex-col">
-        <p className="text-lg text-foreground leading-relaxed flex-1">
+        <p className="text-lg text-foreground leading-relaxed flex-1" data-testid={`text-entity-${type}`}>
           {text}
         </p>
         <div className="mt-4 pt-3 border-t border-border">
-          <p className="text-sm font-mono text-muted-foreground">
+          <p className="text-sm font-mono text-muted-foreground" data-testid={`text-entity-id-${type}`}>
             ID: {id}
           </p>
           {metadata && Object.keys(metadata).length > 0 && (
@@ -93,7 +93,7 @@ function ConfidenceIndicator({ confidence, model }: { confidence: number | null;
   };
 
   return (
-    <div className="flex items-center justify-center gap-4 py-4">
+    <div className="flex items-center justify-center gap-4 py-4" data-testid="container-confidence">
       <div className="flex items-center gap-2">
         <span className="text-sm text-muted-foreground">LLM Confidence:</span>
         <div className="flex items-center gap-2">
@@ -103,7 +103,7 @@ function ConfidenceIndicator({ confidence, model }: { confidence: number | null;
               style={{ width: `${confidence * 100}%` }}
             />
           </div>
-          <span className="text-sm font-mono font-medium">
+          <span className="text-sm font-mono font-medium" data-testid="text-confidence-value">
             {(confidence * 100).toFixed(0)}%
           </span>
         </div>
@@ -145,12 +145,12 @@ function SessionStats({ reviewCount, streak }: { reviewCount: number; streak: nu
     <div className="flex items-center gap-4 text-sm text-muted-foreground">
       <div className="flex items-center gap-1.5">
         <CheckCircle2 className="w-4 h-4" />
-        <span>{reviewCount} reviews</span>
+        <span data-testid="text-session-reviews">{reviewCount} reviews</span>
       </div>
       {streak > 1 && (
         <div className="flex items-center gap-1.5">
           <Zap className="w-4 h-4 text-yellow-500" />
-          <span>Streak: {streak}</span>
+          <span data-testid="text-session-streak">Streak: {streak}</span>
         </div>
       )}
     </div>
@@ -166,7 +166,7 @@ export default function ReviewPage() {
   const [sessionStats, setSessionStats] = useState({ reviewCount: 0, streak: 0 });
 
   const { data: campaign } = useQuery<Campaign>({
-    queryKey: ["/api/campaigns", campaignId],
+    queryKey: [`/api/campaigns/${campaignId}`, "detail", campaignId],
     enabled: !!campaignId,
   });
 
@@ -176,7 +176,7 @@ export default function ReviewPage() {
     refetch: refetchPair,
     isError: pairError,
   } = useQuery<NextPairResponse>({
-    queryKey: ["/api/campaigns", campaignId, "next-pair"],
+    queryKey: [`/api/campaigns/${campaignId}/next-pair`, "next-pair", campaignId],
     enabled: !!campaignId,
   });
 
@@ -304,14 +304,14 @@ export default function ReviewPage() {
               <ArrowLeft className="w-4 h-4" />
             </Button>
             <div>
-              <h1 className="text-xl font-semibold text-foreground">
+              <h1 className="text-xl font-semibold text-foreground" data-testid="text-campaign-title">
                 {campaign?.name || "Review Campaign"}
               </h1>
               <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-sm text-muted-foreground">
+                <span className="text-sm text-muted-foreground" data-testid="text-progress">
                   Progress: {pairData?.progress?.reviewed || 0}/{pairData?.progress?.total || 0} pairs
                 </span>
-                <span className="text-sm text-muted-foreground">({progress}%)</span>
+                <span className="text-sm text-muted-foreground" data-testid="text-progress-percent">({progress}%)</span>
               </div>
             </div>
           </div>
