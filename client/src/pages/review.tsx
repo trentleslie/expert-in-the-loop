@@ -20,6 +20,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
+  ExternalLink,
 } from "lucide-react";
 import type { Campaign, Pair } from "@shared/schema";
 
@@ -35,6 +36,39 @@ type NextPairResponse = {
   };
 };
 
+function LoincLink({ code, className }: { code: string; className?: string }) {
+  const loincUrl = `https://loinc.org/${code}`;
+  return (
+    <a 
+      href={loincUrl} 
+      target="_blank" 
+      rel="noopener noreferrer"
+      className={`inline-flex items-center gap-1 text-primary hover:underline ${className || ""}`}
+      data-testid={`link-loinc-${code}`}
+    >
+      {code}
+      <ExternalLink className="w-3 h-3" />
+    </a>
+  );
+}
+
+function parseTop5Loinc(value: unknown): string[] {
+  if (!value) return [];
+  try {
+    if (typeof value === "string") {
+      // Handle Python-style list string: "['code1', 'code2']"
+      const cleaned = value.replace(/'/g, '"');
+      return JSON.parse(cleaned) as string[];
+    }
+    if (Array.isArray(value)) {
+      return value as string[];
+    }
+  } catch {
+    return [];
+  }
+  return [];
+}
+
 function EntityCard({
   type,
   text,
@@ -48,6 +82,14 @@ function EntityCard({
   id: string;
   metadata?: Record<string, unknown> | null;
 }) {
+  const isLoinc = dataset.toUpperCase() === "LOINC";
+  const top5Loinc = parseTop5Loinc(metadata?.top_5_loinc);
+  
+  // Filter out top_5_loinc from displayed metadata since we show it separately
+  const displayMetadata = metadata 
+    ? Object.entries(metadata).filter(([key]) => key !== "top_5_loinc").slice(0, 3)
+    : [];
+
   return (
     <Card className="border-card-border h-full flex flex-col" data-testid={`card-entity-${type}`}>
       <CardHeader className="pb-3 flex-shrink-0">
@@ -64,17 +106,27 @@ function EntityCard({
         <p className="text-lg text-foreground leading-relaxed flex-1" data-testid={`text-entity-${type}`}>
           {text}
         </p>
-        <div className="mt-4 pt-3 border-t border-border">
+        <div className="mt-4 pt-3 border-t border-border space-y-2">
           <p className="text-sm font-mono text-muted-foreground" data-testid={`text-entity-id-${type}`}>
-            ID: {id}
+            ID: {isLoinc ? <LoincLink code={id} /> : id}
           </p>
-          {metadata && Object.keys(metadata).length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1">
-              {Object.entries(metadata).slice(0, 3).map(([key, value]) => (
+          {displayMetadata.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {displayMetadata.map(([key, value]) => (
                 <Badge key={key} variant="secondary" className="text-xs">
                   {key}: {String(value)}
                 </Badge>
               ))}
+            </div>
+          )}
+          {top5Loinc.length > 0 && (
+            <div className="pt-2">
+              <p className="text-xs text-muted-foreground mb-1">Alternative LOINC suggestions:</p>
+              <div className="flex flex-wrap gap-2">
+                {top5Loinc.map((code) => (
+                  <LoincLink key={code} code={code} className="text-xs font-mono" />
+                ))}
+              </div>
             </div>
           )}
         </div>
