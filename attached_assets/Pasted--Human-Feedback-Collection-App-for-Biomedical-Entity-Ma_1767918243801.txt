@@ -1,0 +1,432 @@
+# Human Feedback Collection App for Biomedical Entity Mapping Validation
+
+## Project Overview
+
+Build a web application that collects human-reviewed feedback on LLM-generated entity mappings for biomedical data harmonization. The primary use cases are:
+
+1. **Cross-Questionnaire Matching**: Validate LLM-suggested matches between questions from different survey instruments (e.g., Arivale ↔ UK Biobank questionnaires)
+1. **Question-to-LOINC Mapping**: Validate LLM-suggested mappings from questionnaire items to standardized LOINC codes
+
+The app serves as the human-in-the-loop validation component for building gold standard datasets used to train/evaluate embedding models and calibrate automated evaluation systems.
+
+-----
+
+## Core Requirements
+
+### Authentication & Authorization
+
+- **Google OAuth 2.0** with domain restriction
+- **Allowed domain**: `phenomehealth.org` (store in config for easy expansion to additional domains later)
+- **Two roles**:
+  - `reviewer`: Can review pairs, see personal stats
+  - `admin`: All reviewer permissions PLUS upload datasets, manage campaigns, view full dashboard, export data
+- Users can hold both roles (admins are also reviewers)
+- Store user info from Google profile: unique ID (`sub`), email, display name
+
+### Data Model
+
+#### Users Table
+
+```
+users:
+  - id: string (Google 'sub' claim - stable unique identifier)
+  - email: string
+  - display_name: string
+  - role: enum ['reviewer', 'admin']
+  - created_at: timestamp
+  - last_active: timestamp
+```
+
+#### Campaigns Table
+
+```
+campaigns:
+  - id: uuid
+  - name: string (e.g., "Arivale↔UKBB Questionnaire Matching")
+  - description: text
+  - campaign_type: enum ['questionnaire_match', 'loinc_mapping', 'custom']
+  - created_by: FK → users.id
+  - created_at: timestamp
+  - status: enum ['draft', 'active', 'completed', 'archived']
+```
+
+#### Pairs Table
+
+```
+pairs:
+  - id: uuid
+  - campaign_id: FK → campaigns.id
+  - pair_type: enum ['questionnaire_match', 'loinc_mapping']
+  
+  # Source item
+  - source_text: text (the question or entity text)
+  - source_dataset: string (e.g., "Arivale_Questionnaire_v2")
+  - source_id: string (original identifier from source system)
+  - source_metadata: jsonb (flexible field for additional context)
+  
+  # Target item
+  - target_text: text (matched question or LOINC long name)
+  - target_dataset: string (e.g., "UKBB_Questionnaire" or "LOINC_2.76")
+  - target_id: string (e.g., question ID or LOINC code like "44261-6")
+  - target_metadata: jsonb (flexible field for additional context)
+  
+  # LLM matching metadata
+  - llm_confidence: float (0.0-1.0, from original matching run)
+  - llm_model: string (e.g., "claude-sonnet-4-20250514")
+  - llm_reasoning: text (optional: LLM's explanation for the match)
+  
+  - created_at: timestamp
+```
+
+#### Votes Table
+
+```
+votes:
+  - id: uuid
+  - pair_id: FK → pairs.id
+  - user_id: FK → users.id
+  - score_binary: boolean (true = match, false = no match, null if numeric mode used)
+  - score_numeric: integer (1-5 scale, null if binary mode used)
+  - scoring_mode: enum ['binary', 'numeric']
+  - created_at: timestamp
+  
+  UNIQUE constraint on (pair_id, user_id) — one vote per user per pair
+```
+
+#### Domain Allowlist Table
+
+```
+allowed_domains:
+  - domain: string (e.g., "phenomehealth.org")
+  - added_at: timestamp
+  - added_by: FK → users.id
+```
+
+-----
+
+## Scoring System
+
+### Binary Mode (Default)
+
+- **👍 Match**: The pair represents equivalent or appropriately matched concepts
+- **👎 No Match**: The pair should not be considered a valid mapping
+
+### Numeric Mode (Optional Toggle)
+
+5-point scale with these anchors:
+
+1. **Completely unrelated** — No meaningful connection
+1. **Tangentially related** — Some topical overlap but measuring different constructs
+1. **Similar but not equivalent** — Related concepts but not interchangeable
+1. **Strongly related** — Acceptable mapping for most harmonization purposes
+1. **Exact/perfect match** — Semantically equivalent, ideal mapping
+
+Users can toggle between modes in their session. The mode used is recorded with each vote.
+
+-----
+
+## Queue Priority Algorithm
+
+Pairs are served to reviewers using this priority order:
+
+```
+Priority 1 (Highest): Pairs with 0 evaluations
+Priority 2: Pairs with low LLM confidence (< 0.7) AND fewer than 3 evaluations
+Priority 3: Pairs with high disagreement (40-60% positive rate) 
+Priority 4: Pairs with fewer total votes (weighted random selection)
+Priority 5 (Lowest): Random from remaining pairs
+```
+
+Within each priority tier, apply weighted random selection favoring pairs with fewer votes.
+
+**Exclusion**: Never show a user a pair they’ve already voted on.
+
+-----
+
+## User Interface
+
+### Pages
+
+#### 1. Login Page
+
+- Google Sign-In button
+- Brief description of the app’s purpose
+- Display error if user’s domain is not in allowlist
+
+#### 2. Home / Campaign Selection
+
+- List of active campaigns the user can participate in
+- Show progress bar for each campaign (X of Y pairs reviewed)
+- Personal stats summary: total contributions, agreement rate with consensus
+
+#### 3. Review Interface (Main Workflow)
+
+**Layout:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Campaign: Arivale↔UKBB Questionnaire Matching                  │
+│  Progress: 127/500 pairs reviewed (25.4%)          [Settings ⚙]│
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─────────────────────────┐   ┌─────────────────────────────┐ │
+│  │ SOURCE                  │   │ TARGET                      │ │
+│  │ Dataset: Arivale v2     │   │ Dataset: UK Biobank         │ │
+│  ├─────────────────────────┤   ├─────────────────────────────┤ │
+│  │                         │   │                             │ │
+│  │ "In the past 2 weeks,   │   │ "How often have you felt    │ │
+│  │ how often have you      │   │ anxious or worried in the   │ │
+│  │ felt nervous or         │   │ last two weeks?"            │ │
+│  │ anxious?"               │   │                             │ │
+│  │                         │   │ ID: UKB-20506               │ │
+│  │ ID: ARV-MH-042          │   │                             │ │
+│  └─────────────────────────┘   └─────────────────────────────┘ │
+│                                                                 │
+│            LLM Confidence: 0.89  (claude-sonnet-4-20250514)             │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Binary Mode [✓]     Numeric Mode [ ]                          │
+│                                                                 │
+│         ┌─────────┐              ┌─────────┐                   │
+│         │  👎 No  │              │  👍 Yes │                   │
+│         │  Match  │              │  Match  │                   │
+│         └─────────┘              └─────────┘                   │
+│                                                                 │
+│  [Skip] — removes from your queue without voting                │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│  Keyboard shortcuts: ← No Match | → Yes Match | ↓ Skip         │
+│  Your session: 12 reviews | Streak: 8 agreements               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**For LOINC mapping pairs, the TARGET panel shows:**
+
+- LOINC code
+- Long common name
+- Component, Property, Timing, System, Scale, Method (LOINC axes)
+
+**Numeric mode replaces the binary buttons with:**
+
+```
+    1          2          3          4          5
+   [ ]        [ ]        [ ]        [ ]        [ ]
+ Unrelated  Tangential  Similar   Strong    Exact
+                                  Match     Match
+```
+
+#### 4. Dashboard (Admin + Personal Stats)
+
+**Personal Stats (All Users):**
+
+- Total votes cast
+- Votes per campaign
+- Agreement rate with consensus (rolling)
+- Recent activity timeline
+
+**Admin Dashboard (Admin Only):**
+
+- Campaign overview: progress, inter-rater reliability (Krippendorff’s alpha)
+- Per-pair breakdown: vote distribution, flagged disagreements
+- Per-reviewer stats: contribution volume, agreement rates
+- Export buttons (CSV, JSON)
+
+#### 5. Campaign Management (Admin Only)
+
+- Create new campaign
+- Upload pairs via CSV/JSON
+- Edit campaign metadata
+- Archive/activate campaigns
+- View/download results
+
+#### 6. Settings (Admin Only)
+
+- Manage allowed domains
+- Promote users to admin role
+- View audit log
+
+-----
+
+## API Endpoints
+
+### Authentication
+
+```
+GET  /auth/google          — Initiate Google OAuth flow
+GET  /auth/google/callback — Handle OAuth callback
+POST /auth/logout          — Clear session
+GET  /auth/me              — Get current user info + role
+```
+
+### Campaigns
+
+```
+GET    /api/campaigns                — List campaigns (filter by status)
+POST   /api/campaigns                — Create campaign (admin)
+GET    /api/campaigns/:id            — Get campaign details
+PATCH  /api/campaigns/:id            — Update campaign (admin)
+DELETE /api/campaigns/:id            — Archive campaign (admin)
+POST   /api/campaigns/:id/pairs      — Bulk upload pairs (admin)
+GET    /api/campaigns/:id/stats      — Get campaign statistics
+GET    /api/campaigns/:id/export     — Export results CSV/JSON (admin)
+```
+
+### Review Workflow
+
+```
+GET  /api/campaigns/:id/next-pair    — Get next pair for review (uses priority queue)
+POST /api/pairs/:id/vote             — Submit vote for a pair
+GET  /api/pairs/:id                  — Get pair details + vote summary (admin)
+```
+
+### User Management
+
+```
+GET   /api/users                     — List users (admin)
+PATCH /api/users/:id/role            — Update user role (admin)
+GET   /api/users/me/stats            — Get personal statistics
+```
+
+### Admin
+
+```
+GET  /api/admin/domains              — List allowed domains
+POST /api/admin/domains              — Add domain (admin)
+DELETE /api/admin/domains/:domain    — Remove domain (admin)
+```
+
+-----
+
+## Data Import Format
+
+### CSV Upload Format for Pairs
+
+```csv
+source_text,source_dataset,source_id,target_text,target_dataset,target_id,llm_confidence,llm_model,pair_type
+"How often do you feel anxious?","Arivale_v2","ARV-MH-042","Frequency of anxiety symptoms","UKBB","UKB-20506",0.89,"claude-sonnet-4-20250514","questionnaire_match"
+"Current smoking status","Arivale_v2","ARV-SM-001","Tobacco smoking status","LOINC_2.76","72166-2",0.95,"claude-sonnet-4-20250514","loinc_mapping"
+```
+
+### JSON Upload Format
+
+```json
+{
+  "pairs": [
+    {
+      "source_text": "How often do you feel anxious?",
+      "source_dataset": "Arivale_v2",
+      "source_id": "ARV-MH-042",
+      "source_metadata": {"category": "mental_health", "response_type": "likert_5"},
+      "target_text": "Frequency of anxiety symptoms",
+      "target_dataset": "UKBB",
+      "target_id": "UKB-20506",
+      "target_metadata": {"field_id": 20506},
+      "llm_confidence": 0.89,
+      "llm_model": "claude-sonnet-4-20250514",
+      "llm_reasoning": "Both questions assess frequency of anxiety symptoms over a recent time period.",
+      "pair_type": "questionnaire_match"
+    }
+  ]
+}
+```
+
+-----
+
+## Export Format
+
+### Results Export (CSV)
+
+```csv
+pair_id,campaign_id,source_text,source_dataset,source_id,target_text,target_dataset,target_id,llm_confidence,total_votes,positive_votes,negative_votes,consensus_binary,mean_numeric_score,agreement_rate,vote_details
+uuid-123,campaign-456,"How often...","Arivale_v2","ARV-MH-042","Frequency...","UKBB","UKB-20506",0.89,5,4,1,true,4.2,0.80,"[{user_hash: 'a1b2', score_binary: true, score_numeric: 5}, ...]"
+```
+
+### Results Export (JSON)
+
+```json
+{
+  "campaign": {
+    "id": "uuid",
+    "name": "Arivale↔UKBB Questionnaire Matching",
+    "exported_at": "2025-01-08T12:00:00Z"
+  },
+  "summary": {
+    "total_pairs": 500,
+    "pairs_with_votes": 450,
+    "total_votes": 1200,
+    "krippendorff_alpha": 0.78
+  },
+  "pairs": [
+    {
+      "pair_id": "uuid-123",
+      "source": {...},
+      "target": {...},
+      "llm_confidence": 0.89,
+      "votes": {
+        "total": 5,
+        "binary": {"positive": 4, "negative": 1},
+        "numeric": {"mean": 4.2, "std": 0.84, "distribution": [0, 0, 1, 2, 2]}
+      },
+      "consensus": {
+        "binary": true,
+        "confidence": 0.80
+      }
+    }
+  ]
+}
+```
+
+-----
+
+## Tech Stack Recommendations
+
+### Frontend
+
+- **React** with TypeScript
+- **Tailwind CSS** for styling
+- **React Query** for data fetching/caching
+- Keyboard shortcut support for rapid review workflow
+
+### Backend
+
+- **Node.js** with Express or Hono
+- **PostgreSQL** database (Replit has native Postgres support)
+- **Passport.js** or similar for Google OAuth
+
+### Deployment
+
+- Replit’s built-in hosting
+- Environment variables for:
+  - `GOOGLE_CLIENT_ID`
+  - `GOOGLE_CLIENT_SECRET`
+  - `SESSION_SECRET`
+  - `DATABASE_URL`
+  - `ALLOWED_DOMAINS` (comma-separated, default: “phenomehealth.org”)
+
+-----
+
+## Key Features Summary
+
+1. **Google OAuth** with domain restriction to `phenomehealth.org`
+1. **Two scoring modes**: Binary (default) and 5-point numeric scale
+1. **Smart queue priority**: Unreviewed → Low LLM confidence → High disagreement → Fewer votes → Random
+1. **Campaign system**: Organize pairs into separate review projects for different entity types
+1. **Role-based access**: Reviewers can review; Admins can also upload, manage, and export
+1. **Full vote tracking**: Every vote recorded with user, timestamp, and scoring mode
+1. **Inter-rater reliability metrics**: Krippendorff’s alpha computed per campaign
+1. **Bulk import/export**: CSV and JSON support for pairs and results
+1. **Keyboard shortcuts**: Speed up review workflow (←/→ for binary, 1-5 for numeric)
+1. **Extensible design**: Campaign types can expand beyond questionnaires to other entity mappings
+
+-----
+
+## Future Extensibility
+
+This architecture supports future expansion to:
+
+- **Metabolite ↔ HMDB mapping** validation
+- **Protein ↔ UniProt mapping** validation
+- **Disease ↔ MONDO/ICD mapping** validation
+- **Cross-cohort variable harmonization** (UK Biobank ↔ Israeli10K ↔ INTERVAL)
+- **Active learning integration**: Feed consensus labels back to improve LLM matching models
