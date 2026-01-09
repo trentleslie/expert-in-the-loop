@@ -47,12 +47,23 @@ export function setupAuth(app: Express) {
 
   // Only configure Google OAuth if credentials are provided
   if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+    // Use REPLIT_DEV_DOMAIN for development or REPLIT_DEPLOYMENT_URL for production
+    const getCallbackURL = () => {
+      if (process.env.REPLIT_DEPLOYMENT_URL) {
+        return `https://${process.env.REPLIT_DEPLOYMENT_URL}/api/auth/google/callback`;
+      }
+      if (process.env.REPLIT_DEV_DOMAIN) {
+        return `https://${process.env.REPLIT_DEV_DOMAIN}/api/auth/google/callback`;
+      }
+      return "/api/auth/google/callback";
+    };
+
     passport.use(
       new GoogleStrategy(
         {
           clientID: process.env.GOOGLE_CLIENT_ID,
           clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-          callbackURL: "/api/auth/google/callback",
+          callbackURL: getCallbackURL(),
           scope: ["profile", "email"],
         },
         async (_accessToken, _refreshToken, profile, done) => {
