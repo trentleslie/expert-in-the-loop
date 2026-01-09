@@ -179,21 +179,41 @@ export async function registerRoutes(
           trim: true,
         });
 
-        pairsData = records.map((row: any) => ({
-          campaignId,
-          pairType: row.pair_type || campaign.campaignType,
-          sourceText: row.source_text,
-          sourceDataset: row.source_dataset,
-          sourceId: row.source_id,
-          sourceMetadata: row.source_metadata ? JSON.parse(row.source_metadata) : null,
-          targetText: row.target_text,
-          targetDataset: row.target_dataset,
-          targetId: row.target_id,
-          targetMetadata: row.target_metadata ? JSON.parse(row.target_metadata) : null,
-          llmConfidence: row.llm_confidence ? parseFloat(row.llm_confidence) : null,
-          llmModel: row.llm_model || null,
-          llmReasoning: row.llm_reasoning || null,
-        }));
+        pairsData = records.map((row: any) => {
+          // Build metadata from extra columns
+          const sourceMetadata: Record<string, unknown> = {};
+          const targetMetadata: Record<string, unknown> = {};
+          
+          if (row.category) sourceMetadata.category = row.category;
+          if (row.units) sourceMetadata.units = row.units;
+          if (row.data_type) sourceMetadata.data_type = row.data_type;
+          if (row.query_source) sourceMetadata.query_source = row.query_source;
+          if (row.num_queries) sourceMetadata.num_queries = row.num_queries;
+          if (row.top_5_loinc) targetMetadata.top_5_loinc = row.top_5_loinc;
+
+          return {
+            campaignId,
+            pairType: row.pair_type || campaign.campaignType,
+            // Support both standard names and Arivale/LOINC format
+            sourceText: row.source_text || row.description,
+            sourceDataset: row.source_dataset || row.cohort || "Unknown",
+            sourceId: row.source_id || row.field_name,
+            sourceMetadata: row.source_metadata 
+              ? JSON.parse(row.source_metadata) 
+              : (Object.keys(sourceMetadata).length > 0 ? sourceMetadata : null),
+            targetText: row.target_text || row.loinc_name,
+            targetDataset: row.target_dataset || (row.loinc_code ? "LOINC" : "Unknown"),
+            targetId: row.target_id || row.loinc_code,
+            targetMetadata: row.target_metadata 
+              ? JSON.parse(row.target_metadata) 
+              : (Object.keys(targetMetadata).length > 0 ? targetMetadata : null),
+            llmConfidence: row.llm_confidence 
+              ? parseFloat(row.llm_confidence) 
+              : (row.confidence_score ? parseFloat(row.confidence_score) : null),
+            llmModel: row.llm_model || null,
+            llmReasoning: row.llm_reasoning || null,
+          };
+        });
       }
 
       const count = await storage.createPairs(pairsData);
