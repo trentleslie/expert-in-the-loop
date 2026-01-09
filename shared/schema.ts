@@ -86,6 +86,10 @@ export const votes = pgTable("votes", {
   scoreBinary: boolean("score_binary"),
   scoreNumeric: integer("score_numeric"),
   scoringMode: scoringModeEnum("scoring_mode").notNull(),
+  // Expert selection: alternative LOINC code selected when reviewer disagrees
+  expertSelectedCode: text("expert_selected_code"),
+  // Reviewer notes/reasoning for their decision
+  reviewerNotes: text("reviewer_notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => ({
   uniqueUserPair: unique().on(table.pairId, table.userId),

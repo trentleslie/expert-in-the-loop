@@ -7,6 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import {
@@ -216,6 +224,8 @@ export default function ReviewPage() {
   const queryClient = useQueryClient();
   
   const [sessionStats, setSessionStats] = useState({ reviewCount: 0, streak: 0 });
+  const [expertSelectedCode, setExpertSelectedCode] = useState<string | null>(null);
+  const [reviewerNotes, setReviewerNotes] = useState("");
 
   const { data: campaign } = useQuery<Campaign>({
     queryKey: [`/api/campaigns/${campaignId}`, "detail", campaignId],
@@ -233,10 +243,17 @@ export default function ReviewPage() {
   });
 
   const voteMutation = useMutation({
-    mutationFn: async ({ pairId, match }: { pairId: string; match: boolean }) => {
+    mutationFn: async ({ pairId, match, expertCode, notes }: { 
+      pairId: string; 
+      match: boolean; 
+      expertCode: string | null;
+      notes: string;
+    }) => {
       return apiRequest("POST", `/api/pairs/${pairId}/vote`, {
         scoreBinary: match,
         scoringMode: "binary",
+        expertSelectedCode: expertCode,
+        reviewerNotes: notes || null,
       });
     },
     onSuccess: () => {
@@ -244,6 +261,9 @@ export default function ReviewPage() {
         reviewCount: prev.reviewCount + 1,
         streak: prev.streak + 1,
       }));
+      // Reset expert selection and notes for next pair
+      setExpertSelectedCode(null);
+      setReviewerNotes("");
       toast({
         title: "Vote recorded",
         description: "Moving to next pair...",
@@ -270,6 +290,9 @@ export default function ReviewPage() {
         ...prev,
         streak: 0,
       }));
+      // Reset expert selection and notes for next pair
+      setExpertSelectedCode(null);
+      setReviewerNotes("");
       refetchPair();
     },
     onError: () => {
@@ -283,9 +306,14 @@ export default function ReviewPage() {
 
   const handleVote = useCallback((match: boolean) => {
     if (pairData?.pair) {
-      voteMutation.mutate({ pairId: pairData.pair.id, match });
+      voteMutation.mutate({ 
+        pairId: pairData.pair.id, 
+        match,
+        expertCode: expertSelectedCode,
+        notes: reviewerNotes,
+      });
     }
-  }, [pairData?.pair, voteMutation]);
+  }, [pairData?.pair, voteMutation, expertSelectedCode, reviewerNotes]);
 
   const handleSkip = useCallback(() => {
     if (pairData?.pair) {
@@ -424,6 +452,56 @@ export default function ReviewPage() {
               confidence={pairData.pair.llmConfidence}
               model={pairData.pair.llmModel}
             />
+
+            {/* Expert selection and notes */}
+            <Card className="border-card-border">
+              <CardContent className="p-4 space-y-4">
+                {/* Expert LOINC selection */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">
+                    Suggest alternative LOINC code (optional)
+                  </label>
+                  <Select
+                    value={expertSelectedCode || "none"}
+                    onValueChange={(value) => setExpertSelectedCode(value === "none" ? null : value)}
+                  >
+                    <SelectTrigger data-testid="select-expert-code">
+                      <SelectValue placeholder="Select from top 5 suggestions..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None (use LLM suggestion)</SelectItem>
+                      {parseTop5Loinc(pairData.pair.targetMetadata?.top_5_loinc).map((code) => (
+                        <SelectItem key={code} value={code}>
+                          <span className="font-mono">{code}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    If the LLM's match isn't correct, select a better LOINC code from the alternatives
+                  </p>
+                </div>
+
+                {/* Notes field */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">
+                    Reviewer notes (optional)
+                  </label>
+                  <Textarea
+                    placeholder="Add any notes about your decision..."
+                    value={reviewerNotes}
+                    onChange={(e) => setReviewerNotes(e.target.value)}
+                    className="resize-none"
+                    rows={2}
+                    maxLength={500}
+                    data-testid="input-reviewer-notes"
+                  />
+                  <p className="text-xs text-muted-foreground text-right">
+                    {reviewerNotes.length}/500
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
 
             <Separator />
 

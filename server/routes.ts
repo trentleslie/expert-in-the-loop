@@ -274,6 +274,8 @@ export async function registerRoutes(
         negative_votes: item.votes.filter((v) => v.scoreBinary === false).length,
         positive_rate: item.positiveRate !== null ? item.positiveRate.toFixed(3) : "",
         consensus: item.positiveRate !== null ? (item.positiveRate > 0.5 ? "match" : "no_match") : "",
+        expert_selections: item.votes.filter(v => v.expertSelectedCode).map(v => v.expertSelectedCode).join("; "),
+        reviewer_notes: item.votes.filter(v => v.reviewerNotes).map(v => v.reviewerNotes).join(" | "),
       }));
 
       const csv = stringify(csvData, { header: true });
@@ -301,6 +303,9 @@ export async function registerRoutes(
         scoreBinary: req.body.scoreBinary,
         scoreNumeric: req.body.scoreNumeric || null,
         scoringMode: req.body.scoringMode || "binary",
+        // Expert selection and notes
+        expertSelectedCode: req.body.expertSelectedCode || null,
+        reviewerNotes: req.body.reviewerNotes || null,
       });
 
       const vote = await storage.createVote(voteData);
