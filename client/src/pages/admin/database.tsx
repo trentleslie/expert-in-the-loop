@@ -142,10 +142,11 @@ export default function DatabaseExplorerPage() {
 
   const executeMutation = useMutation({
     mutationFn: async (sql: string) => {
-      return apiRequest("POST", "/api/database/query", { sql });
+      const response = await apiRequest("POST", "/api/database/query", { sql });
+      return response.json() as Promise<QueryResult>;
     },
     onSuccess: (data) => {
-      setResult(data as QueryResult);
+      setResult(data);
     },
     onError: (error: Error) => {
       toast({
@@ -286,7 +287,7 @@ export default function DatabaseExplorerPage() {
                     )}
                     Run Query
                   </Button>
-                  {result && result.rows.length > 0 && (
+                  {result && result.rows && result.rows.length > 0 && (
                     <Button
                       variant="outline"
                       onClick={handleExportCSV}
@@ -325,11 +326,11 @@ export default function DatabaseExplorerPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="p-0 overflow-auto max-h-96">
-                  {result.rows.length > 0 ? (
+                  {result.rows && result.rows.length > 0 ? (
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          {result.columns.map((col) => (
+                          {(result.columns || []).map((col) => (
                             <TableHead key={col} className="text-xs font-mono">
                               {col}
                             </TableHead>
