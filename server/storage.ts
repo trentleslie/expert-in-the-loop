@@ -121,6 +121,86 @@ export interface IStorage {
     pairCount: number;
     voteCount: number;
   }>;
+  
+  // Analytics
+  getCampaignAnalyticsSummary(): Promise<{
+    id: string;
+    name: string;
+    status: string;
+    totalPairs: number;
+    reviewedPairs: number;
+    completionPercent: number;
+    totalVotes: number;
+    uniqueReviewers: number;
+    avgVotesPerPair: number;
+    alpha: number | null;
+    disagreementCount: number;
+    daysSinceLastActivity: number | null;
+  }[]>;
+  
+  getVoteDistribution(campaignId: string): Promise<{
+    binaryVotes: number;
+    numericVotes: number;
+    matchVotes: number;
+    noMatchVotes: number;
+    numericScoreDistribution: { score: number; count: number }[];
+    numericStats: { mean: number; median: number; stdDev: number } | null;
+    votesByDay: { date: string; binary: number; numeric: number }[];
+  }>;
+  
+  getReviewerStats(campaignId: string): Promise<{
+    userId: string;
+    email: string;
+    displayName: string | null;
+    totalVotes: number;
+    activityLast7Days: number[];
+    agreementRate: number | null;
+    positiveRate: number | null;
+    avgTimeSeconds: number | null;
+    skipCount: number;
+    flags: string[];
+  }[]>;
+  
+  getHighDisagreementPairs(campaignId: string, limit?: number): Promise<{
+    pair: Pair;
+    voteCount: number;
+    positiveVotes: number;
+    negativeVotes: number;
+    positiveRate: number;
+    numericScores: number[];
+    numericMean: number | null;
+    numericStdDev: number | null;
+  }[]>;
+  
+  getDisagreementByConfidence(campaignId: string): Promise<{
+    bucket: string;
+    totalPairs: number;
+    disagreementCount: number;
+    disagreementRate: number;
+  }[]>;
+  
+  getSkipAnalysis(campaignId: string): Promise<{
+    totalSkips: number;
+    uniquePairsSkipped: number;
+    skipRate: number;
+    mostSkippedPairs: {
+      pair: Pair;
+      skipCount: number;
+      voteCount: number;
+    }[];
+    skipsByReviewer: {
+      userId: string;
+      email: string;
+      skipCount: number;
+      skipRate: number;
+    }[];
+  }>;
+  
+  getVotesOverTime(campaignId?: string): Promise<{
+    date: string;
+    count: number;
+    cumulative: number;
+  }[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -327,12 +407,11 @@ export class DatabaseStorage implements IStorage {
     userId: string, 
     updates: Partial<Pick<Vote, "scoreBinary" | "scoreNumeric" | "scoringMode" | "expertSelectedCode" | "reviewerNotes">>
   ): Promise<Vote | null> {
+    const updateData: Record<string, unknown> = { ...updates };
+    updateData.updatedAt = new Date();
     const [updated] = await db
       .update(votes)
-      .set({
-        ...updates,
-        updatedAt: new Date(),
-      })
+      .set(updateData)
       .where(and(eq(votes.pairId, pairId), eq(votes.userId, userId)))
       .returning();
     return updated || null;
@@ -756,6 +835,553 @@ export class DatabaseStorage implements IStorage {
       pairCount: pairIds.size,
       voteCount: campaignVotes.length,
     };
+  }
+  
+  async getCampaignAnalyticsSummary(): Promise<{
+    id: string;
+    name: string;
+    status: string;
+    totalPairs: number;
+    reviewedPairs: number;
+    completionPercent: number;
+    totalVotes: number;
+    uniqueReviewers: number;
+    avgVotesPerPair: number;
+    alpha: number | null;
+    disagreementCount: number;
+    daysSinceLastActivity: number | null;
+  }[]> {
+    const allCampaigns = await this.getAllCampaigns();
+    const result = [];
+    
+    for (const campaign of allCampaigns) {
+      const campaignVotes = await db
+        .select({ userId: votes.userId, pairId: votes.pairId, scoreBinary: votes.scoreBinary, scoringMode: votes.scoringMode, createdAt: votes.createdAt })
+        .from(votes)
+        .innerJoin(pairs, eq(votes.pairId, pairs.id))
+        .where(eq(pairs.campaignId, campaign.id));
+      
+      const uniqueReviewers = new Set(campaignVotes.map(v => v.userId)).size;
+      const reviewedPairs = new Set(campaignVotes.map(v => v.pairId)).size;
+      const avgVotesPerPair = reviewedPairs > 0 ? Math.round((campaignVotes.length / reviewedPairs) * 10) / 10 : 0;
+      
+      const pairVoteCounts = new Map<string, { positive: number; negative: number }>();
+      campaignVotes.forEach(v => {
+        if (v.scoringMode !== "binary") return;
+        if (!pairVoteCounts.has(v.pairId)) {
+          pairVoteCounts.set(v.pairId, { positive: 0, negative: 0 });
+        }
+        const counts = pairVoteCounts.get(v.pairId)!;
+        if (v.scoreBinary === true) counts.positive++;
+        else if (v.scoreBinary === false) counts.negative++;
+      });
+      
+      let disagreementCount = 0;
+      pairVoteCounts.forEach(counts => {
+        const total = counts.positive + counts.negative;
+        if (total >= 2) {
+          const positiveRate = counts.positive / total;
+          if (positiveRate >= 0.4 && positiveRate <= 0.6) {
+            disagreementCount++;
+          }
+        }
+      });
+      
+      const alpha = await this.calculateKrippendorffAlpha(campaign.id);
+      
+      let daysSinceLastActivity: number | null = null;
+      if (campaignVotes.length > 0) {
+        const latestVote = campaignVotes.reduce((latest, v) => 
+          v.createdAt > latest ? v.createdAt : latest, campaignVotes[0].createdAt);
+        daysSinceLastActivity = Math.floor((Date.now() - new Date(latestVote).getTime()) / (1000 * 60 * 60 * 24));
+      }
+      
+      result.push({
+        id: campaign.id,
+        name: campaign.name,
+        status: campaign.status,
+        totalPairs: campaign.totalPairs || 0,
+        reviewedPairs,
+        completionPercent: campaign.totalPairs ? Math.round((reviewedPairs / campaign.totalPairs) * 100) : 0,
+        totalVotes: campaignVotes.length,
+        uniqueReviewers,
+        avgVotesPerPair,
+        alpha: alpha.alpha,
+        disagreementCount,
+        daysSinceLastActivity,
+      });
+    }
+    
+    return result;
+  }
+  
+  async getVoteDistribution(campaignId: string): Promise<{
+    binaryVotes: number;
+    numericVotes: number;
+    matchVotes: number;
+    noMatchVotes: number;
+    numericScoreDistribution: { score: number; count: number }[];
+    numericStats: { mean: number; median: number; stdDev: number } | null;
+    votesByDay: { date: string; binary: number; numeric: number }[];
+  }> {
+    const campaignVotes = await db
+      .select({
+        scoringMode: votes.scoringMode,
+        scoreBinary: votes.scoreBinary,
+        scoreNumeric: votes.scoreNumeric,
+        createdAt: votes.createdAt,
+      })
+      .from(votes)
+      .innerJoin(pairs, eq(votes.pairId, pairs.id))
+      .where(eq(pairs.campaignId, campaignId));
+    
+    let binaryVotes = 0, numericVotes = 0, matchVotes = 0, noMatchVotes = 0;
+    const numericScores: number[] = [];
+    const dayMap = new Map<string, { binary: number; numeric: number }>();
+    
+    campaignVotes.forEach(v => {
+      if (v.scoringMode === "numeric") {
+        numericVotes++;
+        if (v.scoreNumeric) numericScores.push(v.scoreNumeric);
+      } else {
+        binaryVotes++;
+        if (v.scoreBinary) matchVotes++;
+        else noMatchVotes++;
+      }
+      
+      const dateStr = new Date(v.createdAt).toISOString().split('T')[0];
+      if (!dayMap.has(dateStr)) {
+        dayMap.set(dateStr, { binary: 0, numeric: 0 });
+      }
+      const day = dayMap.get(dateStr)!;
+      if (v.scoringMode === "numeric") day.numeric++;
+      else day.binary++;
+    });
+    
+    const numericScoreDistribution: { score: number; count: number }[] = [];
+    for (let i = 1; i <= 5; i++) {
+      numericScoreDistribution.push({
+        score: i,
+        count: numericScores.filter(s => s === i).length,
+      });
+    }
+    
+    let numericStats: { mean: number; median: number; stdDev: number } | null = null;
+    if (numericScores.length > 0) {
+      const mean = numericScores.reduce((a, b) => a + b, 0) / numericScores.length;
+      const sorted = [...numericScores].sort((a, b) => a - b);
+      const median = sorted.length % 2 === 0 
+        ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+        : sorted[Math.floor(sorted.length / 2)];
+      const variance = numericScores.reduce((sum, s) => sum + Math.pow(s - mean, 2), 0) / numericScores.length;
+      const stdDev = Math.sqrt(variance);
+      numericStats = {
+        mean: Math.round(mean * 100) / 100,
+        median: Math.round(median * 100) / 100,
+        stdDev: Math.round(stdDev * 100) / 100,
+      };
+    }
+    
+    const votesByDay = Array.from(dayMap.entries())
+      .map(([date, counts]) => ({ date, ...counts }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    
+    return {
+      binaryVotes,
+      numericVotes,
+      matchVotes,
+      noMatchVotes,
+      numericScoreDistribution,
+      numericStats,
+      votesByDay,
+    };
+  }
+  
+  async getReviewerStats(campaignId: string): Promise<{
+    userId: string;
+    email: string;
+    displayName: string | null;
+    totalVotes: number;
+    activityLast7Days: number[];
+    agreementRate: number | null;
+    positiveRate: number | null;
+    avgTimeSeconds: number | null;
+    skipCount: number;
+    flags: string[];
+  }[]> {
+    const campaignVotes = await db
+      .select({
+        id: votes.id,
+        pairId: votes.pairId,
+        userId: votes.userId,
+        scoreBinary: votes.scoreBinary,
+        scoringMode: votes.scoringMode,
+        createdAt: votes.createdAt,
+      })
+      .from(votes)
+      .innerJoin(pairs, eq(votes.pairId, pairs.id))
+      .where(eq(pairs.campaignId, campaignId));
+    
+    const usersData = await db.select().from(users);
+    const userMap = new Map(usersData.map(u => [u.id, u]));
+    
+    const skipsData = await db
+      .select({ userId: skippedPairs.userId, pairId: skippedPairs.pairId })
+      .from(skippedPairs)
+      .innerJoin(pairs, eq(skippedPairs.pairId, pairs.id))
+      .where(eq(pairs.campaignId, campaignId));
+    
+    const skipsByUser = new Map<string, number>();
+    skipsData.forEach(s => {
+      skipsByUser.set(s.userId, (skipsByUser.get(s.userId) || 0) + 1);
+    });
+    
+    const binaryVotes = campaignVotes.filter(v => v.scoringMode === "binary");
+    
+    const pairConsensus = new Map<string, boolean>();
+    const pairVotes = new Map<string, { positive: number; negative: number }>();
+    binaryVotes.forEach(v => {
+      if (!pairVotes.has(v.pairId)) {
+        pairVotes.set(v.pairId, { positive: 0, negative: 0 });
+      }
+      const counts = pairVotes.get(v.pairId)!;
+      if (v.scoreBinary === true) counts.positive++;
+      else if (v.scoreBinary === false) counts.negative++;
+    });
+    pairVotes.forEach((counts, pairId) => {
+      pairConsensus.set(pairId, counts.positive > counts.negative);
+    });
+    
+    const userStats = new Map<string, {
+      votes: typeof campaignVotes;
+      binaryVotes: typeof binaryVotes;
+      positiveCount: number;
+      agreementCount: number;
+    }>();
+    
+    campaignVotes.forEach(v => {
+      if (!userStats.has(v.userId)) {
+        userStats.set(v.userId, { votes: [], binaryVotes: [], positiveCount: 0, agreementCount: 0 });
+      }
+      const stats = userStats.get(v.userId)!;
+      stats.votes.push(v);
+      
+      if (v.scoringMode === "binary") {
+        stats.binaryVotes.push(v);
+        if (v.scoreBinary === true) stats.positiveCount++;
+        
+        const consensus = pairConsensus.get(v.pairId);
+        if (consensus !== undefined && v.scoreBinary === consensus) {
+          stats.agreementCount++;
+        }
+      }
+    });
+    
+    const now = new Date();
+    const result = [];
+    
+    for (const [userId, stats] of Array.from(userStats.entries())) {
+      const user = userMap.get(userId);
+      if (!user) continue;
+      
+      const activityLast7Days: number[] = [];
+      for (let i = 6; i >= 0; i--) {
+        const day = new Date(now);
+        day.setDate(day.getDate() - i);
+        const dayStr = day.toISOString().split('T')[0];
+        const count = stats.votes.filter((v: { createdAt: Date }) => 
+          new Date(v.createdAt).toISOString().split('T')[0] === dayStr
+        ).length;
+        activityLast7Days.push(count);
+      }
+      
+      const totalVotes = stats.votes.length;
+      const binaryCount = stats.binaryVotes.length;
+      const positiveRate = binaryCount >= 5 ? Math.round((stats.positiveCount / binaryCount) * 100) : null;
+      const agreementRate = binaryCount >= 5 ? Math.round((stats.agreementCount / binaryCount) * 100) : null;
+      const skipCount = skipsByUser.get(userId) || 0;
+      
+      const flags: string[] = [];
+      if (positiveRate !== null && agreementRate !== null) {
+        if (agreementRate < 75) flags.push("low_agreement");
+        if (positiveRate > 85) flags.push("high_positive_bias");
+        if (positiveRate < 35) flags.push("high_negative_bias");
+      }
+      
+      result.push({
+        userId,
+        email: user.email,
+        displayName: user.displayName,
+        totalVotes,
+        activityLast7Days,
+        agreementRate,
+        positiveRate,
+        avgTimeSeconds: null,
+        skipCount,
+        flags,
+      });
+    }
+    
+    return result.sort((a, b) => b.totalVotes - a.totalVotes);
+  }
+  
+  async getHighDisagreementPairs(campaignId: string, limit: number = 50): Promise<{
+    pair: Pair;
+    voteCount: number;
+    positiveVotes: number;
+    negativeVotes: number;
+    positiveRate: number;
+    numericScores: number[];
+    numericMean: number | null;
+    numericStdDev: number | null;
+  }[]> {
+    const campaignPairs = await db.select().from(pairs).where(eq(pairs.campaignId, campaignId));
+    const pairMap = new Map(campaignPairs.map(p => [p.id, p]));
+    
+    const allVotes = await db
+      .select()
+      .from(votes)
+      .innerJoin(pairs, eq(votes.pairId, pairs.id))
+      .where(eq(pairs.campaignId, campaignId));
+    
+    const pairStats = new Map<string, {
+      positiveVotes: number;
+      negativeVotes: number;
+      numericScores: number[];
+    }>();
+    
+    allVotes.forEach(({ votes: v }) => {
+      if (!pairStats.has(v.pairId)) {
+        pairStats.set(v.pairId, { positiveVotes: 0, negativeVotes: 0, numericScores: [] });
+      }
+      const stats = pairStats.get(v.pairId)!;
+      if (v.scoringMode === "binary") {
+        if (v.scoreBinary === true) stats.positiveVotes++;
+        else if (v.scoreBinary === false) stats.negativeVotes++;
+      }
+      if (v.scoreNumeric) stats.numericScores.push(v.scoreNumeric);
+    });
+    
+    const result = [];
+    for (const [pairId, stats] of Array.from(pairStats.entries())) {
+      const pair = pairMap.get(pairId);
+      if (!pair) continue;
+      
+      const voteCount = stats.positiveVotes + stats.negativeVotes;
+      if (voteCount < 2) continue;
+      
+      const positiveRate = Math.round((stats.positiveVotes / voteCount) * 100);
+      
+      if (positiveRate < 40 || positiveRate > 60) continue;
+      
+      let numericMean: number | null = null;
+      let numericStdDev: number | null = null;
+      if (stats.numericScores.length > 0) {
+        numericMean = Math.round((stats.numericScores.reduce((a: number, b: number) => a + b, 0) / stats.numericScores.length) * 100) / 100;
+        const variance = stats.numericScores.reduce((sum: number, s: number) => sum + Math.pow(s - numericMean!, 2), 0) / stats.numericScores.length;
+        numericStdDev = Math.round(Math.sqrt(variance) * 100) / 100;
+      }
+      
+      result.push({
+        pair,
+        voteCount,
+        positiveVotes: stats.positiveVotes,
+        negativeVotes: stats.negativeVotes,
+        positiveRate,
+        numericScores: stats.numericScores,
+        numericMean,
+        numericStdDev,
+      });
+    }
+    
+    return result
+      .sort((a, b) => Math.abs(50 - a.positiveRate) - Math.abs(50 - b.positiveRate))
+      .slice(0, limit);
+  }
+  
+  async getDisagreementByConfidence(campaignId: string): Promise<{
+    bucket: string;
+    totalPairs: number;
+    disagreementCount: number;
+    disagreementRate: number;
+  }[]> {
+    const campaignPairs = await db.select().from(pairs).where(eq(pairs.campaignId, campaignId));
+    
+    const allVotes = await db
+      .select()
+      .from(votes)
+      .innerJoin(pairs, eq(votes.pairId, pairs.id))
+      .where(eq(pairs.campaignId, campaignId));
+    
+    const pairVoteCounts = new Map<string, { positive: number; negative: number }>();
+    allVotes.forEach(({ votes: v }) => {
+      if (!pairVoteCounts.has(v.pairId)) {
+        pairVoteCounts.set(v.pairId, { positive: 0, negative: 0 });
+      }
+      const counts = pairVoteCounts.get(v.pairId)!;
+      if (v.scoreBinary) counts.positive++;
+      else counts.negative++;
+    });
+    
+    const buckets = [
+      { name: "0.9-1.0", min: 0.9, max: 1.0 },
+      { name: "0.8-0.9", min: 0.8, max: 0.9 },
+      { name: "0.7-0.8", min: 0.7, max: 0.8 },
+      { name: "0.6-0.7", min: 0.6, max: 0.7 },
+      { name: "<0.6", min: 0, max: 0.6 },
+    ];
+    
+    const result = buckets.map(bucket => {
+      const pairsInBucket = campaignPairs.filter(p => {
+        const conf = p.llmConfidence || 0;
+        return conf >= bucket.min && conf < bucket.max;
+      });
+      
+      let disagreementCount = 0;
+      pairsInBucket.forEach(p => {
+        const counts = pairVoteCounts.get(p.id);
+        if (counts) {
+          const total = counts.positive + counts.negative;
+          if (total >= 2) {
+            const rate = counts.positive / total;
+            if (rate >= 0.4 && rate <= 0.6) disagreementCount++;
+          }
+        }
+      });
+      
+      return {
+        bucket: bucket.name,
+        totalPairs: pairsInBucket.length,
+        disagreementCount,
+        disagreementRate: pairsInBucket.length > 0 ? Math.round((disagreementCount / pairsInBucket.length) * 100) : 0,
+      };
+    });
+    
+    return result;
+  }
+  
+  async getSkipAnalysis(campaignId: string): Promise<{
+    totalSkips: number;
+    uniquePairsSkipped: number;
+    skipRate: number;
+    mostSkippedPairs: {
+      pair: Pair;
+      skipCount: number;
+      voteCount: number;
+    }[];
+    skipsByReviewer: {
+      userId: string;
+      email: string;
+      skipCount: number;
+      skipRate: number;
+    }[];
+  }> {
+    const campaignPairs = await db.select().from(pairs).where(eq(pairs.campaignId, campaignId));
+    const pairMap = new Map(campaignPairs.map(p => [p.id, p]));
+    
+    const skipsData = await db
+      .select()
+      .from(skippedPairs)
+      .innerJoin(pairs, eq(skippedPairs.pairId, pairs.id))
+      .where(eq(pairs.campaignId, campaignId));
+    
+    const votesData = await db
+      .select({ pairId: votes.pairId, userId: votes.userId, id: votes.id })
+      .from(votes)
+      .innerJoin(pairs, eq(votes.pairId, pairs.id))
+      .where(eq(pairs.campaignId, campaignId));
+    
+    const usersData = await db.select().from(users);
+    const userMap = new Map(usersData.map(u => [u.id, u]));
+    
+    const pairSkipCounts = new Map<string, number>();
+    const pairVoteCounts = new Map<string, number>();
+    const userSkipCounts = new Map<string, number>();
+    const userVoteCounts = new Map<string, number>();
+    
+    skipsData.forEach(({ skipped_pairs: s }) => {
+      pairSkipCounts.set(s.pairId, (pairSkipCounts.get(s.pairId) || 0) + 1);
+      userSkipCounts.set(s.userId, (userSkipCounts.get(s.userId) || 0) + 1);
+    });
+    
+    votesData.forEach(v => {
+      pairVoteCounts.set(v.pairId, (pairVoteCounts.get(v.pairId) || 0) + 1);
+      userVoteCounts.set(v.userId, (userVoteCounts.get(v.userId) || 0) + 1);
+    });
+    
+    const mostSkippedPairs = Array.from(pairSkipCounts.entries())
+      .map(([pairId, skipCount]) => ({
+        pair: pairMap.get(pairId)!,
+        skipCount,
+        voteCount: pairVoteCounts.get(pairId) || 0,
+      }))
+      .filter(p => p.pair)
+      .sort((a, b) => b.skipCount - a.skipCount)
+      .slice(0, 20);
+    
+    const skipsByReviewer = Array.from(userSkipCounts.entries())
+      .map(([userId, skipCount]) => {
+        const user = userMap.get(userId);
+        const userVotes = userVoteCounts.get(userId) || 0;
+        return {
+          userId,
+          email: user?.email || "Unknown",
+          skipCount,
+          skipRate: userVotes + skipCount > 0 ? Math.round((skipCount / (userVotes + skipCount)) * 100) : 0,
+        };
+      })
+      .sort((a, b) => b.skipCount - a.skipCount);
+    
+    const totalSkips = skipsData.length;
+    const uniquePairsSkipped = pairSkipCounts.size;
+    const totalReviewed = new Set(votesData.map(v => v.pairId)).size;
+    const skipRate = totalReviewed + uniquePairsSkipped > 0 
+      ? Math.round((uniquePairsSkipped / (totalReviewed + uniquePairsSkipped)) * 100)
+      : 0;
+    
+    return {
+      totalSkips,
+      uniquePairsSkipped,
+      skipRate,
+      mostSkippedPairs,
+      skipsByReviewer,
+    };
+  }
+  
+  async getVotesOverTime(campaignId?: string): Promise<{
+    date: string;
+    count: number;
+    cumulative: number;
+  }[]> {
+    let allVotes: { createdAt: Date }[];
+    
+    if (campaignId) {
+      allVotes = await db
+        .select({ createdAt: votes.createdAt })
+        .from(votes)
+        .innerJoin(pairs, eq(votes.pairId, pairs.id))
+        .where(eq(pairs.campaignId, campaignId));
+    } else {
+      allVotes = await db
+        .select({ createdAt: votes.createdAt })
+        .from(votes);
+    }
+    
+    const dayMap = new Map<string, number>();
+    allVotes.forEach(v => {
+      const dateStr = new Date(v.createdAt).toISOString().split('T')[0];
+      dayMap.set(dateStr, (dayMap.get(dateStr) || 0) + 1);
+    });
+    
+    const sortedDays = Array.from(dayMap.entries())
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    
+    let cumulative = 0;
+    return sortedDays.map(d => {
+      cumulative += d.count;
+      return { ...d, cumulative };
+    });
   }
 }
 

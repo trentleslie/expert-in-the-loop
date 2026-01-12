@@ -139,6 +139,12 @@ export default function AdminDashboard() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <Link href="/admin/analytics">
+              <Button variant="outline" data-testid="link-analytics">
+                <BarChart3 className="w-4 h-4 mr-2" />
+                Analytics
+              </Button>
+            </Link>
             <Link href="/admin/campaigns">
               <Button variant="outline" data-testid="link-manage-campaigns">
                 Manage Campaigns

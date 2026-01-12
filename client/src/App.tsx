@@ -20,6 +20,7 @@ import AdminDatabase from "@/pages/admin/database";
 import AdminDomains from "@/pages/admin/domains";
 import AdminUsers from "@/pages/admin/users";
 import AdminSettings from "@/pages/admin/settings";
+import AdminAnalytics from "@/pages/admin/analytics";
 import NotFound from "@/pages/not-found";
 
 function LoadingScreen() {
@@ -147,6 +148,12 @@ function Router() {
       <Route path="/admin/settings">
         <ProtectedRoute requireAdmin>
           <AdminSettings />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/admin/analytics">
+        <ProtectedRoute requireAdmin>
+          <AdminAnalytics />
         </ProtectedRoute>
       </Route>
 

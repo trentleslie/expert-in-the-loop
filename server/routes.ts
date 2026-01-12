@@ -581,6 +581,77 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== ANALYTICS ROUTES ====================
+
+  // Campaign analytics summary (all campaigns)
+  app.get("/api/analytics/campaigns", requireAdmin, async (req, res) => {
+    try {
+      const summary = await storage.getCampaignAnalyticsSummary();
+      res.json(summary);
+    } catch (error) {
+      console.error("Error fetching analytics summary:", error);
+      res.status(500).json({ message: "Failed to fetch analytics" });
+    }
+  });
+
+  // Vote distribution for a campaign
+  app.get("/api/analytics/campaigns/:id/votes", requireAdmin, async (req, res) => {
+    try {
+      const distribution = await storage.getVoteDistribution(req.params.id);
+      res.json(distribution);
+    } catch (error) {
+      console.error("Error fetching vote distribution:", error);
+      res.status(500).json({ message: "Failed to fetch vote distribution" });
+    }
+  });
+
+  // Reviewer stats for a campaign
+  app.get("/api/analytics/campaigns/:id/reviewers", requireAdmin, async (req, res) => {
+    try {
+      const stats = await storage.getReviewerStats(req.params.id);
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching reviewer stats:", error);
+      res.status(500).json({ message: "Failed to fetch reviewer stats" });
+    }
+  });
+
+  // High disagreement pairs for a campaign
+  app.get("/api/analytics/campaigns/:id/disagreements", requireAdmin, async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const pairs = await storage.getHighDisagreementPairs(req.params.id, limit);
+      const byConfidence = await storage.getDisagreementByConfidence(req.params.id);
+      res.json({ pairs, byConfidence });
+    } catch (error) {
+      console.error("Error fetching disagreement data:", error);
+      res.status(500).json({ message: "Failed to fetch disagreement data" });
+    }
+  });
+
+  // Skip analysis for a campaign
+  app.get("/api/analytics/campaigns/:id/skips", requireAdmin, async (req, res) => {
+    try {
+      const analysis = await storage.getSkipAnalysis(req.params.id);
+      res.json(analysis);
+    } catch (error) {
+      console.error("Error fetching skip analysis:", error);
+      res.status(500).json({ message: "Failed to fetch skip analysis" });
+    }
+  });
+
+  // Votes over time (optional campaignId)
+  app.get("/api/analytics/votes-over-time", requireAdmin, async (req, res) => {
+    try {
+      const campaignId = req.query.campaignId as string | undefined;
+      const data = await storage.getVotesOverTime(campaignId);
+      res.json(data);
+    } catch (error) {
+      console.error("Error fetching votes over time:", error);
+      res.status(500).json({ message: "Failed to fetch votes over time" });
+    }
+  });
+
   // Execute read-only SQL query (admin only)
   app.post("/api/database/query", requireAdmin, async (req, res) => {
     try {
