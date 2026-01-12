@@ -17,13 +17,14 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import {
   ThumbsUp,
   ThumbsDown,
   SkipForward,
   ArrowLeft,
   Keyboard,
-  Settings,
   Zap,
   CheckCircle2,
   AlertCircle,
@@ -177,7 +178,28 @@ function ConfidenceIndicator({ confidence, model }: { confidence: number | null;
   );
 }
 
-function KeyboardShortcuts() {
+function KeyboardShortcuts({ isNumericMode }: { isNumericMode: boolean }) {
+  if (isNumericMode) {
+    return (
+      <div className="flex items-center justify-center gap-6 py-3 text-xs text-muted-foreground flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <Keyboard className="w-3.5 h-3.5" />
+          <span>Keyboard shortcuts:</span>
+        </div>
+        {[1, 2, 3, 4, 5].map((n) => (
+          <div key={n} className="flex items-center gap-1">
+            <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">{n}</kbd>
+            <span>Score {n}</span>
+          </div>
+        ))}
+        <div className="flex items-center gap-1">
+          <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">↓</kbd>
+          <span>Skip</span>
+        </div>
+      </div>
+    );
+  }
+  
   return (
     <div className="flex items-center justify-center gap-6 py-3 text-xs text-muted-foreground">
       <div className="flex items-center gap-1.5">
@@ -226,6 +248,7 @@ export default function ReviewPage() {
   const [sessionStats, setSessionStats] = useState({ reviewCount: 0, streak: 0 });
   const [expertSelectedCode, setExpertSelectedCode] = useState<string | null>(null);
   const [reviewerNotes, setReviewerNotes] = useState("");
+  const [isNumericMode, setIsNumericMode] = useState(false);
 
   const { data: campaign } = useQuery<Campaign>({
     queryKey: [`/api/campaigns/${campaignId}`, "detail", campaignId],
@@ -243,15 +266,18 @@ export default function ReviewPage() {
   });
 
   const voteMutation = useMutation({
-    mutationFn: async ({ pairId, match, expertCode, notes }: { 
+    mutationFn: async ({ pairId, scoreBinary, scoreNumeric, expertCode, notes, scoringMode }: { 
       pairId: string; 
-      match: boolean; 
+      scoreBinary: boolean | null;
+      scoreNumeric: number | null;
       expertCode: string | null;
       notes: string;
+      scoringMode: "binary" | "numeric";
     }) => {
       return apiRequest("POST", `/api/pairs/${pairId}/vote`, {
-        scoreBinary: match,
-        scoringMode: "binary",
+        scoreBinary,
+        scoreNumeric,
+        scoringMode,
         expertSelectedCode: expertCode,
         reviewerNotes: notes || null,
       });
@@ -304,11 +330,26 @@ export default function ReviewPage() {
     },
   });
 
-  const handleVote = useCallback((match: boolean) => {
+  const handleBinaryVote = useCallback((match: boolean) => {
     if (pairData?.pair) {
       voteMutation.mutate({ 
         pairId: pairData.pair.id, 
-        match,
+        scoreBinary: match,
+        scoreNumeric: null,
+        scoringMode: "binary",
+        expertCode: expertSelectedCode,
+        notes: reviewerNotes,
+      });
+    }
+  }, [pairData?.pair, voteMutation, expertSelectedCode, reviewerNotes]);
+
+  const handleNumericVote = useCallback((score: number) => {
+    if (pairData?.pair) {
+      voteMutation.mutate({ 
+        pairId: pairData.pair.id, 
+        scoreBinary: null,
+        scoreNumeric: score,
+        scoringMode: "numeric",
         expertCode: expertSelectedCode,
         notes: reviewerNotes,
       });
@@ -326,13 +367,29 @@ export default function ReviewPage() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (voteMutation.isPending || skipMutation.isPending || !pairData?.pair) return;
       
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        handleVote(false);
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        handleVote(true);
-      } else if (e.key === "ArrowDown") {
+      if (isNumericMode) {
+        // Numeric mode: 1-5 keys for scoring
+        const numKey = parseInt(e.key);
+        if (numKey >= 1 && numKey <= 5) {
+          e.preventDefault();
+          handleNumericVote(numKey);
+          return;
+        }
+      } else {
+        // Binary mode: arrow keys
+        if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          handleBinaryVote(false);
+          return;
+        } else if (e.key === "ArrowRight") {
+          e.preventDefault();
+          handleBinaryVote(true);
+          return;
+        }
+      }
+      
+      // Skip works in both modes
+      if (e.key === "ArrowDown") {
         e.preventDefault();
         handleSkip();
       }
@@ -340,7 +397,7 @@ export default function ReviewPage() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleVote, handleSkip, voteMutation.isPending, skipMutation.isPending, pairData?.pair]);
+  }, [handleBinaryVote, handleNumericVote, handleSkip, voteMutation.isPending, skipMutation.isPending, pairData?.pair, isNumericMode]);
 
   const progress = pairData?.progress 
     ? Math.round((pairData.progress.reviewed / Math.max(pairData.progress.total, 1)) * 100)
@@ -505,39 +562,86 @@ export default function ReviewPage() {
 
             <Separator />
 
+            {/* Scoring mode toggle */}
+            <div className="flex items-center justify-center gap-4">
+              <Label htmlFor="scoring-mode" className="text-sm text-muted-foreground">
+                Binary Mode
+              </Label>
+              <Switch
+                id="scoring-mode"
+                checked={isNumericMode}
+                onCheckedChange={setIsNumericMode}
+                data-testid="switch-scoring-mode"
+              />
+              <Label htmlFor="scoring-mode" className="text-sm text-muted-foreground">
+                Numeric Mode (1-5)
+              </Label>
+            </div>
+
             {/* Voting buttons */}
             <div className="space-y-4">
-              <div className="flex items-center justify-center gap-4">
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="h-14 px-8 gap-3"
-                  onClick={() => handleVote(false)}
-                  disabled={isSubmitting}
-                  data-testid="button-no-match"
-                >
-                  {isSubmitting ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
-                    <ThumbsDown className="w-5 h-5" />
-                  )}
-                  No Match
-                </Button>
-                <Button
-                  size="lg"
-                  className="h-14 px-8 gap-3"
-                  onClick={() => handleVote(true)}
-                  disabled={isSubmitting}
-                  data-testid="button-yes-match"
-                >
-                  {isSubmitting ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
-                    <ThumbsUp className="w-5 h-5" />
-                  )}
-                  Yes Match
-                </Button>
-              </div>
+              {isNumericMode ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-center gap-2">
+                    {[1, 2, 3, 4, 5].map((score) => (
+                      <Button
+                        key={score}
+                        size="lg"
+                        variant={score >= 4 ? "default" : score <= 2 ? "outline" : "secondary"}
+                        className="h-14 w-14 text-lg font-semibold"
+                        onClick={() => handleNumericVote(score)}
+                        disabled={isSubmitting}
+                        data-testid={`button-score-${score}`}
+                      >
+                        {isSubmitting ? (
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                        ) : (
+                          score
+                        )}
+                      </Button>
+                    ))}
+                  </div>
+                  <div className="flex items-center justify-center gap-4 text-xs text-muted-foreground">
+                    <span>1 = Unrelated</span>
+                    <span>2 = Tangential</span>
+                    <span>3 = Similar</span>
+                    <span>4 = Strong</span>
+                    <span>5 = Exact</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center gap-4">
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    className="h-14 px-8 gap-3"
+                    onClick={() => handleBinaryVote(false)}
+                    disabled={isSubmitting}
+                    data-testid="button-no-match"
+                  >
+                    {isSubmitting ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <ThumbsDown className="w-5 h-5" />
+                    )}
+                    No Match
+                  </Button>
+                  <Button
+                    size="lg"
+                    className="h-14 px-8 gap-3"
+                    onClick={() => handleBinaryVote(true)}
+                    disabled={isSubmitting}
+                    data-testid="button-yes-match"
+                  >
+                    {isSubmitting ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <ThumbsUp className="w-5 h-5" />
+                    )}
+                    Yes Match
+                  </Button>
+                </div>
+              )}
 
               <div className="flex justify-center">
                 <Button
@@ -555,7 +659,7 @@ export default function ReviewPage() {
             </div>
 
             {/* Keyboard shortcuts */}
-            <KeyboardShortcuts />
+            <KeyboardShortcuts isNumericMode={isNumericMode} />
           </>
         )}
       </div>

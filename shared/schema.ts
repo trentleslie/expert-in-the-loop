@@ -130,6 +130,23 @@ export const skippedPairs = pgTable("skipped_pairs", {
   uniqueSkip: unique().on(table.pairId, table.userId),
 }));
 
+// Import Templates Table (stores column mapping configurations for CSV import)
+export const importTemplates = pgTable("import_templates", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  createdBy: varchar("created_by", { length: 255 }).references(() => users.id).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  columnMappings: jsonb("column_mappings").notNull(),
+});
+
+export const importTemplatesRelations = relations(importTemplates, ({ one }) => ({
+  creator: one(users, {
+    fields: [importTemplates.createdBy],
+    references: [users.id],
+  }),
+}));
+
 // Insert Schemas
 export const insertUserSchema = createInsertSchema(users).omit({
   createdAt: true,
@@ -160,6 +177,11 @@ export const insertSkippedPairSchema = createInsertSchema(skippedPairs).omit({
   createdAt: true,
 });
 
+export const insertImportTemplateSchema = createInsertSchema(importTemplates).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -178,6 +200,9 @@ export type InsertAllowedDomain = z.infer<typeof insertAllowedDomainSchema>;
 
 export type SkippedPair = typeof skippedPairs.$inferSelect;
 export type InsertSkippedPair = z.infer<typeof insertSkippedPairSchema>;
+
+export type ImportTemplate = typeof importTemplates.$inferSelect;
+export type InsertImportTemplate = z.infer<typeof insertImportTemplateSchema>;
 
 // Extended types for frontend
 export type CampaignWithStats = Campaign & {

@@ -247,6 +247,50 @@ export async function registerRoutes(
     }
   });
 
+  // Get campaign results with pagination and filters (admin only)
+  app.get("/api/campaigns/:id/results", requireAdmin, async (req, res) => {
+    try {
+      const campaignId = req.params.id;
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+      const search = req.query.search as string | undefined;
+      const consensus = req.query.consensus as "match" | "no_match" | "disagreement" | "unreviewed" | undefined;
+      const minVotes = req.query.minVotes ? parseInt(req.query.minVotes as string) : undefined;
+      const maxVotes = req.query.maxVotes ? parseInt(req.query.maxVotes as string) : undefined;
+
+      const results = await storage.getCampaignResults(campaignId, {
+        page,
+        limit,
+        search,
+        consensus: consensus || null,
+        minVotes,
+        maxVotes,
+      });
+
+      res.json(results);
+    } catch (error) {
+      console.error("Error fetching campaign results:", error);
+      res.status(500).json({ message: "Failed to fetch campaign results" });
+    }
+  });
+
+  // Get pair details with all votes (admin only)
+  app.get("/api/pairs/:id/details", requireAdmin, async (req, res) => {
+    try {
+      const pairId = req.params.id;
+      const details = await storage.getPairDetails(pairId);
+
+      if (!details) {
+        return res.status(404).json({ message: "Pair not found" });
+      }
+
+      res.json(details);
+    } catch (error) {
+      console.error("Error fetching pair details:", error);
+      res.status(500).json({ message: "Failed to fetch pair details" });
+    }
+  });
+
   // Export campaign results (admin only)
   app.get("/api/campaigns/:id/export", requireAdmin, async (req, res) => {
     try {
@@ -378,6 +422,45 @@ export async function registerRoutes(
     }
   });
 
+  // Get current user's vote history
+  app.get("/api/users/me/votes", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const userVotes = await storage.getUserVotes(userId);
+      res.json(userVotes);
+    } catch (error) {
+      console.error("Error fetching user votes:", error);
+      res.status(500).json({ message: "Failed to fetch vote history" });
+    }
+  });
+
+  // Update a vote (for corrections)
+  app.patch("/api/pairs/:id/vote", requireAuth, async (req, res) => {
+    try {
+      const pairId = req.params.id;
+      const userId = req.user!.id;
+      
+      const { scoreBinary, scoreNumeric, scoringMode, expertSelectedCode, reviewerNotes } = req.body;
+      
+      const updated = await storage.updateVote(pairId, userId, {
+        scoreBinary: scoreBinary !== undefined ? scoreBinary : undefined,
+        scoreNumeric: scoreNumeric !== undefined ? scoreNumeric : undefined,
+        scoringMode: scoringMode !== undefined ? scoringMode : undefined,
+        expertSelectedCode: expertSelectedCode !== undefined ? expertSelectedCode : undefined,
+        reviewerNotes: reviewerNotes !== undefined ? reviewerNotes : undefined,
+      });
+      
+      if (!updated) {
+        return res.status(404).json({ message: "Vote not found" });
+      }
+      
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating vote:", error);
+      res.status(500).json({ message: "Failed to update vote" });
+    }
+  });
+
   // ==================== ADMIN ROUTES ====================
 
   // Get admin dashboard stats
@@ -409,8 +492,15 @@ export async function registerRoutes(
       if (!domain || typeof domain !== "string") {
         return res.status(400).json({ message: "Domain is required" });
       }
+      
+      const normalizedDomain = domain.trim().toLowerCase();
+      const domainRegex = /^[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,}$/;
+      if (!domainRegex.test(normalizedDomain)) {
+        return res.status(400).json({ message: "Invalid domain format. Use format: example.com" });
+      }
+      
       const created = await storage.addAllowedDomain({
-        domain: domain.toLowerCase(),
+        domain: normalizedDomain,
         addedBy: req.user!.id,
       });
       res.status(201).json(created);
@@ -431,6 +521,108 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error removing domain:", error);
       res.status(500).json({ message: "Failed to remove domain" });
+    }
+  });
+
+  // ==================== INTER-RATER RELIABILITY ====================
+
+  // Get Krippendorff's Alpha for a campaign
+  app.get("/api/campaigns/:id/alpha", requireAuth, async (req, res) => {
+    try {
+      const result = await storage.calculateKrippendorffAlpha(req.params.id);
+      res.json(result);
+    } catch (error) {
+      console.error("Error calculating alpha:", error);
+      res.status(500).json({ message: "Failed to calculate alpha" });
+    }
+  });
+
+  // ==================== IMPORT TEMPLATES ====================
+
+  // Get all import templates
+  app.get("/api/import-templates", requireAdmin, async (req, res) => {
+    try {
+      const templates = await storage.getImportTemplates();
+      res.json(templates);
+    } catch (error) {
+      console.error("Error fetching templates:", error);
+      res.status(500).json({ message: "Failed to fetch templates" });
+    }
+  });
+
+  // Create import template
+  app.post("/api/import-templates", requireAdmin, async (req, res) => {
+    try {
+      const { name, description, columnMappings } = req.body;
+      if (!name || !columnMappings) {
+        return res.status(400).json({ message: "Name and column mappings are required" });
+      }
+      const template = await storage.createImportTemplate({
+        name,
+        description: description || null,
+        columnMappings,
+        createdBy: req.user!.id,
+      });
+      res.status(201).json(template);
+    } catch (error) {
+      console.error("Error creating template:", error);
+      res.status(500).json({ message: "Failed to create template" });
+    }
+  });
+
+  // Delete import template
+  app.delete("/api/import-templates/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteImportTemplate(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting template:", error);
+      res.status(500).json({ message: "Failed to delete template" });
+    }
+  });
+
+  // Execute read-only SQL query (admin only)
+  app.post("/api/database/query", requireAdmin, async (req, res) => {
+    try {
+      const { sql } = req.body;
+      if (!sql || typeof sql !== "string") {
+        return res.status(400).json({ message: "SQL query is required" });
+      }
+
+      const normalizedSql = sql.trim().replace(/\s+/g, " ").toUpperCase();
+      
+      const forbiddenPatterns = [
+        /^INSERT\b/i, /^UPDATE\b/i, /^DELETE\b/i, /^DROP\b/i, /^ALTER\b/i,
+        /^CREATE\b/i, /^TRUNCATE\b/i, /^GRANT\b/i, /^REVOKE\b/i, 
+        /^EXECUTE\b/i, /^EXEC\b/i, /^CALL\b/i, /^SET\b/i, /^VACUUM\b/i,
+        /^COPY\b/i, /^LOCK\b/i, /^REINDEX\b/i, /^CLUSTER\b/i,
+        /;\s*INSERT\b/i, /;\s*UPDATE\b/i, /;\s*DELETE\b/i, /;\s*DROP\b/i,
+        /;\s*ALTER\b/i, /;\s*CREATE\b/i, /;\s*TRUNCATE\b/i,
+      ];
+      
+      const containsForbidden = forbiddenPatterns.some(pattern => pattern.test(sql));
+      
+      if (containsForbidden) {
+        return res.status(403).json({ message: "Only SELECT queries are allowed. Mutating operations are blocked." });
+      }
+      
+      if (!normalizedSql.startsWith("SELECT ") && !normalizedSql.startsWith("WITH ") && !normalizedSql.startsWith("EXPLAIN ")) {
+        return res.status(403).json({ message: "Only SELECT, WITH, or EXPLAIN queries are allowed" });
+      }
+
+      const startTime = Date.now();
+      const result = await storage.executeReadOnlyQuery(sql);
+      const executionTime = Date.now() - startTime;
+
+      res.json({
+        columns: result.columns,
+        rows: result.rows,
+        rowCount: result.rows.length,
+        executionTime,
+      });
+    } catch (error: any) {
+      console.error("Query error:", error);
+      res.status(400).json({ message: error.message || "Query execution failed" });
     }
   });
 

@@ -34,16 +34,21 @@ import {
   LogOut,
   LayoutDashboard,
   Database,
+  History,
+  Globe,
 } from "lucide-react";
 
 const reviewerMenuItems = [
   { title: "Home", url: "/", icon: Home },
   { title: "My Stats", url: "/stats", icon: BarChart3 },
+  { title: "Vote History", url: "/vote-history", icon: History },
 ];
 
 const adminMenuItems = [
   { title: "Dashboard", url: "/admin", icon: LayoutDashboard },
   { title: "Campaigns", url: "/admin/campaigns", icon: ClipboardList },
+  { title: "Database", url: "/admin/database", icon: Database },
+  { title: "Domains", url: "/admin/domains", icon: Globe },
   { title: "Users", url: "/admin/users", icon: Users },
   { title: "Settings", url: "/admin/settings", icon: Settings },
 ];

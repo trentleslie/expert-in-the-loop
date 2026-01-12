@@ -1,11 +1,12 @@
 import { 
-  users, campaigns, pairs, votes, allowedDomains, skippedPairs,
+  users, campaigns, pairs, votes, allowedDomains, skippedPairs, importTemplates,
   type User, type InsertUser,
   type Campaign, type InsertCampaign,
   type Pair, type InsertPair,
   type Vote, type InsertVote,
   type AllowedDomain, type InsertAllowedDomain,
   type InsertSkippedPair,
+  type ImportTemplate, type InsertImportTemplate,
   type CampaignWithStats, type UserStats
 } from "@shared/schema";
 import { db } from "./db";
@@ -39,6 +40,8 @@ export interface IStorage {
   // Votes
   createVote(vote: InsertVote): Promise<Vote>;
   getVotesByPair(pairId: string): Promise<Vote[]>;
+  getUserVotes(userId: string): Promise<(Vote & { pair: Pair })[]>;
+  updateVote(pairId: string, userId: string, updates: Partial<Pick<Vote, "scoreBinary" | "scoreNumeric" | "scoringMode" | "expertSelectedCode" | "reviewerNotes">>): Promise<Vote | null>;
   getUserVotesCount(userId: string): Promise<number>;
   getUserVotesPerCampaign(userId: string): Promise<{ campaignId: string; campaignName: string; voteCount: number }[]>;
   getUserRecentActivity(userId: string, days: number): Promise<{ date: string; count: number }[]>;
@@ -69,6 +72,55 @@ export interface IStorage {
     votes: Vote[];
     positiveRate: number | null;
   }[]>;
+  
+  // Results Browser (paginated)
+  getCampaignResults(campaignId: string, options: {
+    page: number;
+    limit: number;
+    search?: string;
+    consensus?: "match" | "no_match" | "disagreement" | "unreviewed" | null;
+    minVotes?: number;
+    maxVotes?: number;
+  }): Promise<{
+    pairs: {
+      pair: Pair;
+      voteCount: number;
+      positiveVotes: number;
+      negativeVotes: number;
+      skipCount: number;
+      positiveRate: number | null;
+    }[];
+    total: number;
+    page: number;
+    totalPages: number;
+  }>;
+  
+  // Get pair details with all votes
+  getPairDetails(pairId: string): Promise<{
+    pair: Pair;
+    votes: (Vote & { user: Pick<User, "id" | "email" | "displayName"> })[];
+    skipCount: number;
+  } | null>;
+  
+  // Database explorer
+  executeReadOnlyQuery(sql: string): Promise<{
+    columns: string[];
+    rows: Record<string, unknown>[];
+  }>;
+  
+  // Import Templates
+  getImportTemplates(): Promise<ImportTemplate[]>;
+  getImportTemplate(id: string): Promise<ImportTemplate | undefined>;
+  createImportTemplate(template: InsertImportTemplate): Promise<ImportTemplate>;
+  deleteImportTemplate(id: string): Promise<void>;
+  
+  // Krippendorff's Alpha
+  calculateKrippendorffAlpha(campaignId: string): Promise<{
+    alpha: number | null;
+    raterCount: number;
+    pairCount: number;
+    voteCount: number;
+  }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -256,6 +308,36 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(votes).where(eq(votes.pairId, pairId));
   }
 
+  async getUserVotes(userId: string): Promise<(Vote & { pair: Pair })[]> {
+    const result = await db
+      .select()
+      .from(votes)
+      .innerJoin(pairs, eq(votes.pairId, pairs.id))
+      .where(eq(votes.userId, userId))
+      .orderBy(desc(votes.createdAt));
+    
+    return result.map(row => ({
+      ...row.votes,
+      pair: row.pairs,
+    }));
+  }
+
+  async updateVote(
+    pairId: string, 
+    userId: string, 
+    updates: Partial<Pick<Vote, "scoreBinary" | "scoreNumeric" | "scoringMode" | "expertSelectedCode" | "reviewerNotes">>
+  ): Promise<Vote | null> {
+    const [updated] = await db
+      .update(votes)
+      .set({
+        ...updates,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(votes.pairId, pairId), eq(votes.userId, userId)))
+      .returning();
+    return updated || null;
+  }
+
   async getUserVotesCount(userId: string): Promise<number> {
     const [result] = await db
       .select({ count: count() })
@@ -415,6 +497,265 @@ export class DatabaseStorage implements IStorage {
     }
     
     return result;
+  }
+
+  async getCampaignResults(campaignId: string, options: {
+    page: number;
+    limit: number;
+    search?: string;
+    consensus?: "match" | "no_match" | "disagreement" | "unreviewed" | null;
+    minVotes?: number;
+    maxVotes?: number;
+  }) {
+    const { page, limit, search, consensus, minVotes, maxVotes } = options;
+    const offset = (page - 1) * limit;
+
+    // Get all pairs with vote/skip aggregates
+    const allPairs = await db
+      .select({
+        pair: pairs,
+        voteCount: sql<number>`COALESCE(COUNT(DISTINCT ${votes.id}), 0)::int`,
+        positiveVotes: sql<number>`COALESCE(SUM(CASE WHEN ${votes.scoreBinary} = true THEN 1 ELSE 0 END), 0)::int`,
+        negativeVotes: sql<number>`COALESCE(SUM(CASE WHEN ${votes.scoreBinary} = false THEN 1 ELSE 0 END), 0)::int`,
+        skipCount: sql<number>`COALESCE(COUNT(DISTINCT ${skippedPairs.id}), 0)::int`,
+      })
+      .from(pairs)
+      .leftJoin(votes, eq(pairs.id, votes.pairId))
+      .leftJoin(skippedPairs, eq(pairs.id, skippedPairs.pairId))
+      .where(eq(pairs.campaignId, campaignId))
+      .groupBy(pairs.id)
+      .orderBy(desc(pairs.createdAt));
+
+    // Apply filters in memory
+    let filteredPairs = allPairs.map(row => ({
+      pair: row.pair,
+      voteCount: row.voteCount,
+      positiveVotes: row.positiveVotes,
+      negativeVotes: row.negativeVotes,
+      skipCount: row.skipCount,
+      positiveRate: row.voteCount > 0 ? row.positiveVotes / row.voteCount : null,
+    }));
+
+    // Search filter
+    if (search) {
+      const searchLower = search.toLowerCase();
+      filteredPairs = filteredPairs.filter(
+        row => 
+          row.pair.sourceText.toLowerCase().includes(searchLower) ||
+          row.pair.targetText.toLowerCase().includes(searchLower) ||
+          row.pair.sourceId.toLowerCase().includes(searchLower) ||
+          row.pair.targetId.toLowerCase().includes(searchLower)
+      );
+    }
+
+    // Consensus filter
+    if (consensus) {
+      filteredPairs = filteredPairs.filter(row => {
+        if (consensus === "unreviewed") return row.voteCount === 0;
+        if (consensus === "match") return row.positiveRate !== null && row.positiveRate > 0.6;
+        if (consensus === "no_match") return row.positiveRate !== null && row.positiveRate < 0.4;
+        if (consensus === "disagreement") return row.positiveRate !== null && row.positiveRate >= 0.4 && row.positiveRate <= 0.6;
+        return true;
+      });
+    }
+
+    // Vote count filters
+    if (minVotes !== undefined) {
+      filteredPairs = filteredPairs.filter(row => row.voteCount >= minVotes);
+    }
+    if (maxVotes !== undefined) {
+      filteredPairs = filteredPairs.filter(row => row.voteCount <= maxVotes);
+    }
+
+    const total = filteredPairs.length;
+    const totalPages = Math.ceil(total / limit);
+    const paginatedPairs = filteredPairs.slice(offset, offset + limit);
+
+    return {
+      pairs: paginatedPairs,
+      total,
+      page,
+      totalPages,
+    };
+  }
+
+  async getPairDetails(pairId: string) {
+    const [pair] = await db.select().from(pairs).where(eq(pairs.id, pairId));
+    if (!pair) return null;
+
+    const pairVotes = await db
+      .select({
+        vote: votes,
+        user: {
+          id: users.id,
+          email: users.email,
+          displayName: users.displayName,
+        },
+      })
+      .from(votes)
+      .innerJoin(users, eq(votes.userId, users.id))
+      .where(eq(votes.pairId, pairId))
+      .orderBy(desc(votes.createdAt));
+
+    const [skipResult] = await db
+      .select({ count: count() })
+      .from(skippedPairs)
+      .where(eq(skippedPairs.pairId, pairId));
+
+    return {
+      pair,
+      votes: pairVotes.map(row => ({
+        ...row.vote,
+        user: row.user,
+      })),
+      skipCount: skipResult?.count || 0,
+    };
+  }
+  
+  async executeReadOnlyQuery(sqlQuery: string): Promise<{ columns: string[]; rows: Record<string, unknown>[] }> {
+    const result = await db.execute(sql.raw(sqlQuery));
+    if (!result.rows || result.rows.length === 0) {
+      return { columns: [], rows: [] };
+    }
+    const columns = result.fields?.map((f: { name: string }) => f.name) || Object.keys(result.rows[0] || {});
+    return {
+      columns,
+      rows: result.rows as Record<string, unknown>[],
+    };
+  }
+  
+  async getImportTemplates(): Promise<ImportTemplate[]> {
+    return db.select().from(importTemplates).orderBy(desc(importTemplates.createdAt));
+  }
+  
+  async getImportTemplate(id: string): Promise<ImportTemplate | undefined> {
+    const [template] = await db.select().from(importTemplates).where(eq(importTemplates.id, id));
+    return template;
+  }
+  
+  async createImportTemplate(template: InsertImportTemplate): Promise<ImportTemplate> {
+    const [created] = await db.insert(importTemplates).values(template).returning();
+    return created;
+  }
+  
+  async deleteImportTemplate(id: string): Promise<void> {
+    await db.delete(importTemplates).where(eq(importTemplates.id, id));
+  }
+  
+  async calculateKrippendorffAlpha(campaignId: string): Promise<{
+    alpha: number | null;
+    raterCount: number;
+    pairCount: number;
+    voteCount: number;
+  }> {
+    const campaignVotes = await db
+      .select({
+        pairId: votes.pairId,
+        userId: votes.userId,
+        scoreBinary: votes.scoreBinary,
+        scoreNumeric: votes.scoreNumeric,
+        scoringMode: votes.scoringMode,
+      })
+      .from(votes)
+      .innerJoin(pairs, eq(votes.pairId, pairs.id))
+      .where(eq(pairs.campaignId, campaignId));
+
+    if (campaignVotes.length === 0) {
+      return { alpha: null, raterCount: 0, pairCount: 0, voteCount: 0 };
+    }
+
+    const raters = new Set<string>();
+    const pairIds = new Set<string>();
+    campaignVotes.forEach(v => {
+      raters.add(v.userId);
+      pairIds.add(v.pairId);
+    });
+
+    if (raters.size < 2) {
+      return { alpha: null, raterCount: raters.size, pairCount: pairIds.size, voteCount: campaignVotes.length };
+    }
+
+    const dataMatrix: Map<string, number[]> = new Map();
+    campaignVotes.forEach(v => {
+      if (!dataMatrix.has(v.pairId)) {
+        dataMatrix.set(v.pairId, []);
+      }
+      const score = v.scoringMode === "numeric" 
+        ? (v.scoreNumeric ?? 3) 
+        : (v.scoreBinary ? 1 : 0);
+      dataMatrix.get(v.pairId)!.push(score);
+    });
+
+    const unitsWithRatings = Array.from(dataMatrix.entries())
+      .filter(([_, scores]) => scores.length >= 2);
+
+    if (unitsWithRatings.length < 1) {
+      return { alpha: null, raterCount: raters.size, pairCount: pairIds.size, voteCount: campaignVotes.length };
+    }
+
+    let totalN = 0;
+    const valueCounts: Map<number, number> = new Map();
+    
+    unitsWithRatings.forEach(([_, scores]) => {
+      scores.forEach(score => {
+        totalN++;
+        valueCounts.set(score, (valueCounts.get(score) || 0) + 1);
+      });
+    });
+
+    if (totalN < 3) {
+      return { alpha: null, raterCount: raters.size, pairCount: pairIds.size, voteCount: campaignVotes.length };
+    }
+
+    let observedDisagreement = 0;
+    let totalPairingsWithinUnits = 0;
+
+    unitsWithRatings.forEach(([_, scores]) => {
+      const m = scores.length;
+      if (m < 2) return;
+      
+      for (let i = 0; i < m; i++) {
+        for (let j = i + 1; j < m; j++) {
+          const diff = scores[i] === scores[j] ? 0 : 1;
+          observedDisagreement += diff;
+          totalPairingsWithinUnits++;
+        }
+      }
+    });
+
+    if (totalPairingsWithinUnits === 0) {
+      return { alpha: null, raterCount: raters.size, pairCount: pairIds.size, voteCount: campaignVotes.length };
+    }
+
+    const Do = observedDisagreement / totalPairingsWithinUnits;
+
+    let expectedDisagreement = 0;
+    const values = Array.from(valueCounts.keys());
+    
+    for (let i = 0; i < values.length; i++) {
+      for (let j = i + 1; j < values.length; j++) {
+        const ni = valueCounts.get(values[i])!;
+        const nj = valueCounts.get(values[j])!;
+        const diff = values[i] === values[j] ? 0 : 1;
+        expectedDisagreement += ni * nj * diff;
+      }
+    }
+
+    const totalPairings = (totalN * (totalN - 1)) / 2;
+    const De = expectedDisagreement / totalPairings;
+
+    if (De === 0) {
+      return { alpha: 1, raterCount: raters.size, pairCount: pairIds.size, voteCount: campaignVotes.length };
+    }
+
+    const alpha = 1 - (Do / De);
+
+    return {
+      alpha: Math.max(-1, Math.min(1, Math.round(alpha * 1000) / 1000)),
+      raterCount: raters.size,
+      pairCount: pairIds.size,
+      voteCount: campaignVotes.length,
+    };
   }
 }
 

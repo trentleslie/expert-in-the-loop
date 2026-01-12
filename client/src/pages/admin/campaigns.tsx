@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -41,7 +42,8 @@ import {
   Pause, 
   Archive,
   FileUp,
-  Loader2
+  Loader2,
+  Search,
 } from "lucide-react";
 import type { CampaignWithStats } from "@shared/schema";
 import { useForm } from "react-hook-form";
@@ -403,19 +405,33 @@ function CampaignCard({ campaign, onUpdate }: { campaign: CampaignWithStats; onU
           <Progress value={progress} className="h-2" />
         </div>
 
-        <div className="flex items-center gap-2 pt-2">
+        <div className="flex items-center gap-2 pt-2 flex-wrap">
           <UploadPairsDialog campaignId={campaign.id} onSuccess={onUpdate} />
           {campaign.totalPairs > 0 && (
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="gap-2" 
-              onClick={handleExport}
-              data-testid={`button-export-${campaign.id}`}
-            >
-              <Download className="w-4 h-4" />
-              Export
-            </Button>
+            <>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="gap-2" 
+                asChild
+                data-testid={`button-browse-${campaign.id}`}
+              >
+                <Link href={`/admin/campaigns/${campaign.id}/results`}>
+                  <Search className="w-4 h-4" />
+                  Browse
+                </Link>
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="gap-2" 
+                onClick={handleExport}
+                data-testid={`button-export-${campaign.id}`}
+              >
+                <Download className="w-4 h-4" />
+                Export
+              </Button>
+            </>
           )}
         </div>
       </CardContent>

@@ -12,8 +12,12 @@ import LoginPage from "@/pages/login";
 import HomePage from "@/pages/home";
 import ReviewPage from "@/pages/review";
 import StatsPage from "@/pages/stats";
+import VoteHistoryPage from "@/pages/vote-history";
 import AdminDashboard from "@/pages/admin/dashboard";
 import AdminCampaigns from "@/pages/admin/campaigns";
+import AdminResults from "@/pages/admin/results";
+import AdminDatabase from "@/pages/admin/database";
+import AdminDomains from "@/pages/admin/domains";
 import AdminUsers from "@/pages/admin/users";
 import AdminSettings from "@/pages/admin/settings";
 import NotFound from "@/pages/not-found";
@@ -97,6 +101,12 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
+      <Route path="/vote-history">
+        <ProtectedRoute>
+          <VoteHistoryPage />
+        </ProtectedRoute>
+      </Route>
+
       {/* Protected admin routes */}
       <Route path="/admin">
         <ProtectedRoute requireAdmin>
@@ -107,6 +117,24 @@ function Router() {
       <Route path="/admin/campaigns">
         <ProtectedRoute requireAdmin>
           <AdminCampaigns />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/admin/campaigns/:id/results">
+        <ProtectedRoute requireAdmin>
+          <AdminResults />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/admin/database">
+        <ProtectedRoute requireAdmin>
+          <AdminDatabase />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/admin/domains">
+        <ProtectedRoute requireAdmin>
+          <AdminDomains />
         </ProtectedRoute>
       </Route>
 
