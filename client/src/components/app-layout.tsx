@@ -36,6 +36,7 @@ import {
   Database,
   History,
   Globe,
+  PieChart,
 } from "lucide-react";
 
 const reviewerMenuItems = [
@@ -105,6 +106,26 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+
+            {/* Analytics - Available to all users */}
+            <SidebarGroup>
+              <SidebarGroupLabel>Analytics</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={location === "/analytics"}
+                    >
+                      <Link href="/analytics">
+                        <PieChart className="w-4 h-4" />
+                        <span>Campaign Analytics</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>

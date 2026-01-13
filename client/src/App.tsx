@@ -151,8 +151,8 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
-      <Route path="/admin/analytics">
-        <ProtectedRoute requireAdmin>
+      <Route path="/analytics">
+        <ProtectedRoute>
           <AdminAnalytics />
         </ProtectedRoute>
       </Route>
