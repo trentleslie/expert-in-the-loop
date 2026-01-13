@@ -46,13 +46,18 @@ import {
   Bar,
   PieChart,
   Pie,
+  ScatterChart,
+  Scatter,
   Cell,
   XAxis,
   YAxis,
+  ZAxis,
   CartesianGrid,
   Tooltip,
   Legend,
   ResponsiveContainer,
+  ReferenceLine,
+  ReferenceArea,
 } from "recharts";
 
 type CampaignSummary = {
@@ -213,19 +218,19 @@ function CampaignCard({ campaign }: { campaign: CampaignSummary }) {
 
 function VoteDistributionSection({ data }: { data: VoteDistribution }) {
   const modeData = [
-    { name: "Binary", value: data.binaryVotes },
-    { name: "Numeric", value: data.numericVotes },
+    { name: "Binary", value: data.binaryVotes || 0 },
+    { name: "Numeric", value: data.numericVotes || 0 },
   ];
   
   const binaryData = [
-    { name: "Match", value: data.matchVotes },
-    { name: "No Match", value: data.noMatchVotes },
+    { name: "Match", value: data.matchVotes || 0 },
+    { name: "No Match", value: data.noMatchVotes || 0 },
   ];
 
   const scoreLabels = ["Unrelated", "Tangential", "Similar", "Strong", "Exact"];
-  const numericData = data.numericScoreDistribution.map((d, i) => ({
+  const numericData = (data.numericScoreDistribution || []).map((d, i) => ({
     ...d,
-    label: `${d.score} (${scoreLabels[i]})`,
+    label: `${d.score} (${scoreLabels[i] || ''})`,
   }));
 
   return (
@@ -329,7 +334,7 @@ function VoteDistributionSection({ data }: { data: VoteDistribution }) {
         </Card>
       )}
       
-      {data.votesByDay.length > 1 && (
+      {(data.votesByDay?.length || 0) > 1 && (
         <Card className="border-card-border">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Vote Activity by Day</CardTitle>
@@ -354,73 +359,147 @@ function VoteDistributionSection({ data }: { data: VoteDistribution }) {
 }
 
 function ReviewerStatsSection({ data }: { data: ReviewerStat[] }) {
+  const scatterData = data
+    .filter(r => r.agreementRate !== null && r.positiveRate !== null)
+    .map(r => ({
+      name: r.displayName || r.email.split('@')[0],
+      x: r.positiveRate!,
+      y: r.agreementRate!,
+      votes: r.totalVotes,
+      hasFlag: r.flags.length > 0,
+    }));
+
   return (
-    <Card className="border-card-border">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium">Reviewer Statistics</CardTitle>
-        <div className="text-xs text-muted-foreground">
-          Flags: Low agreement (&lt;75%) | Extreme bias (&gt;85% or &lt;35%) | High skip rate
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Reviewer</TableHead>
-                <TableHead className="text-right">Votes</TableHead>
-                <TableHead className="text-center">Activity (7d)</TableHead>
-                <TableHead className="text-right">Agreement</TableHead>
-                <TableHead className="text-right">Pos Rate</TableHead>
-                <TableHead className="text-right">Skips</TableHead>
-                <TableHead>Flags</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.map((reviewer) => (
-                <TableRow key={reviewer.userId}>
-                  <TableCell>
-                    <div className="max-w-40 truncate" title={reviewer.email}>
-                      {reviewer.displayName || reviewer.email}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right font-medium">{reviewer.totalVotes}</TableCell>
-                  <TableCell className="text-center">
-                    <div className="flex justify-center gap-0.5">
-                      {reviewer.activityLast7Days.map((count, i) => (
-                        <div
-                          key={i}
-                          className="w-2 bg-primary rounded-sm"
-                          style={{
-                            height: `${Math.min(Math.max(count * 2, 4), 24)}px`,
-                            opacity: count > 0 ? 0.3 + (count / Math.max(...reviewer.activityLast7Days)) * 0.7 : 0.1,
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {reviewer.agreementRate !== null ? `${reviewer.agreementRate}%` : "—"}
-                  </TableCell>
-                  <TableCell className="text-right">{reviewer.positiveRate !== null ? `${reviewer.positiveRate}%` : "—"}</TableCell>
-                  <TableCell className="text-right">{reviewer.skipCount}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-1 flex-wrap">
-                      {reviewer.flags.map((flag) => (
-                        <Badge key={flag} variant="outline" className="text-xs">
-                          {flag === "low_agreement" && <AlertCircle className="w-3 h-3 mr-1" />}
-                          {flag.replace(/_/g, " ")}
-                        </Badge>
-                      ))}
-                    </div>
-                  </TableCell>
+    <div className="space-y-6">
+      <Card className="border-card-border">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Reviewer Statistics</CardTitle>
+          <div className="text-xs text-muted-foreground">
+            Flags: Low agreement (&lt;75%) | Extreme bias (&gt;85% or &lt;35%) | High skip rate
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Reviewer</TableHead>
+                  <TableHead className="text-right">Votes</TableHead>
+                  <TableHead className="text-center">Activity (7d)</TableHead>
+                  <TableHead className="text-right">Agreement</TableHead>
+                  <TableHead className="text-right">Pos Rate</TableHead>
+                  <TableHead className="text-right">Skips</TableHead>
+                  <TableHead>Flags</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </CardContent>
-    </Card>
+              </TableHeader>
+              <TableBody>
+                {data.map((reviewer) => (
+                  <TableRow key={reviewer.userId}>
+                    <TableCell>
+                      <div className="max-w-40 truncate" title={reviewer.email}>
+                        {reviewer.displayName || reviewer.email}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right font-medium">{reviewer.totalVotes}</TableCell>
+                    <TableCell className="text-center">
+                      <div className="flex justify-center gap-0.5">
+                        {(reviewer.activityLast7Days || []).map((count, i) => (
+                          <div
+                            key={i}
+                            className="w-2 bg-primary rounded-sm"
+                            style={{
+                              height: `${Math.min(Math.max(count * 2, 4), 24)}px`,
+                              opacity: count > 0 ? 0.3 + (count / Math.max(...(reviewer.activityLast7Days || [1]))) * 0.7 : 0.1,
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {reviewer.agreementRate !== null ? `${reviewer.agreementRate}%` : "—"}
+                    </TableCell>
+                    <TableCell className="text-right">{reviewer.positiveRate !== null ? `${reviewer.positiveRate}%` : "—"}</TableCell>
+                    <TableCell className="text-right">{reviewer.skipCount}</TableCell>
+                    <TableCell>
+                      <div className="flex gap-1 flex-wrap">
+                        {(reviewer.flags || []).map((flag) => (
+                          <Badge key={flag} variant="outline" className="text-xs">
+                            {flag === "low_agreement" && <AlertCircle className="w-3 h-3 mr-1" />}
+                            {flag.replace(/_/g, " ")}
+                          </Badge>
+                        ))}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {scatterData.length >= 2 && (
+        <Card className="border-card-border">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Agreement vs. Positive Rate</CardTitle>
+            <div className="text-xs text-muted-foreground">
+              Ideal zone: 60-80% positive rate + &gt;80% agreement (shaded)
+            </div>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={300}>
+              <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" className="opacity-50" />
+                <XAxis 
+                  type="number" 
+                  dataKey="x" 
+                  name="Positive Rate" 
+                  domain={[0, 100]} 
+                  tickFormatter={(v) => `${v}%`}
+                  label={{ value: 'Positive Rate', position: 'bottom', offset: 0 }}
+                />
+                <YAxis 
+                  type="number" 
+                  dataKey="y" 
+                  name="Agreement" 
+                  domain={[50, 100]} 
+                  tickFormatter={(v) => `${v}%`}
+                  label={{ value: 'Agreement', angle: -90, position: 'left', offset: 10 }}
+                />
+                <ZAxis type="number" dataKey="votes" range={[50, 400]} name="Votes" />
+                <ReferenceArea x1={60} x2={80} y1={80} y2={100} fill="hsl(var(--primary))" fillOpacity={0.1} />
+                <ReferenceLine y={75} stroke="hsl(var(--destructive))" strokeDasharray="5 5" label={{ value: '75%', position: 'right' }} />
+                <Tooltip 
+                  content={({ payload }) => {
+                    if (!payload || payload.length === 0) return null;
+                    const data = payload[0].payload;
+                    return (
+                      <div className="bg-popover border rounded-md p-2 text-sm shadow-md">
+                        <div className="font-medium">{data.name}</div>
+                        <div>Agreement: {data.y}%</div>
+                        <div>Positive Rate: {data.x}%</div>
+                        <div>Votes: {data.votes}</div>
+                      </div>
+                    );
+                  }}
+                />
+                <Scatter 
+                  data={scatterData} 
+                  fill="hsl(var(--primary))"
+                >
+                  {scatterData.map((entry, index) => (
+                    <Cell 
+                      key={`cell-${index}`} 
+                      fill={entry.hasFlag ? "hsl(var(--destructive))" : "hsl(var(--primary))"}
+                    />
+                  ))}
+                </Scatter>
+              </ScatterChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }
 
@@ -507,6 +586,12 @@ function DisagreementSection({ data }: { data: DisagreementData }) {
 }
 
 function SkipAnalysisSection({ data }: { data: SkipAnalysis }) {
+  const skipRateDistribution = (data.skipsByReviewer || []).map(r => ({
+    name: r.email.split('@')[0],
+    rate: r.skipRate,
+    count: r.skipCount,
+  })).sort((a, b) => b.rate - a.rate);
+
   return (
     <div className="space-y-6">
       <div className="grid md:grid-cols-3 gap-4">
@@ -529,8 +614,55 @@ function SkipAnalysisSection({ data }: { data: SkipAnalysis }) {
           </CardContent>
         </Card>
       </div>
+
+      {skipRateDistribution.length > 0 && (
+        <Card className="border-card-border">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Skip Rate by Reviewer</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={skipRateDistribution.slice(0, 10)} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" className="opacity-50" />
+                <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 11 }} />
+                <Tooltip formatter={(value: number) => `${value}%`} />
+                <Bar dataKey="rate" name="Skip Rate" fill="hsl(var(--muted-foreground))" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      {(data.skipsByReviewer?.length || 0) > 0 && (
+        <Card className="border-card-border">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Skips by Reviewer</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Reviewer</TableHead>
+                  <TableHead className="text-right">Skips</TableHead>
+                  <TableHead className="text-right">Skip Rate</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.skipsByReviewer!.slice(0, 10).map((item) => (
+                  <TableRow key={item.userId}>
+                    <TableCell className="max-w-48 truncate">{item.email}</TableCell>
+                    <TableCell className="text-right font-medium">{item.skipCount}</TableCell>
+                    <TableCell className="text-right">{item.skipRate}%</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
       
-      {data.mostSkippedPairs.length > 0 && (
+      {(data.mostSkippedPairs?.length || 0) > 0 && (
         <Card className="border-card-border">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Most Skipped Pairs</CardTitle>

@@ -582,9 +582,10 @@ export async function registerRoutes(
   });
 
   // ==================== ANALYTICS ROUTES ====================
+  // Analytics routes are accessible to all authenticated users (reviewers and admins)
 
   // Campaign analytics summary (all campaigns)
-  app.get("/api/analytics/campaigns", requireAdmin, async (req, res) => {
+  app.get("/api/analytics/campaigns", requireAuth, async (req, res) => {
     try {
       const summary = await storage.getCampaignAnalyticsSummary();
       res.json(summary);
@@ -595,7 +596,7 @@ export async function registerRoutes(
   });
 
   // Vote distribution for a campaign
-  app.get("/api/analytics/campaigns/:id/votes", requireAdmin, async (req, res) => {
+  app.get("/api/analytics/campaigns/:id/votes", requireAuth, async (req, res) => {
     try {
       const distribution = await storage.getVoteDistribution(req.params.id);
       res.json(distribution);
@@ -606,7 +607,7 @@ export async function registerRoutes(
   });
 
   // Reviewer stats for a campaign
-  app.get("/api/analytics/campaigns/:id/reviewers", requireAdmin, async (req, res) => {
+  app.get("/api/analytics/campaigns/:id/reviewers", requireAuth, async (req, res) => {
     try {
       const stats = await storage.getReviewerStats(req.params.id);
       res.json(stats);
@@ -617,7 +618,7 @@ export async function registerRoutes(
   });
 
   // High disagreement pairs for a campaign
-  app.get("/api/analytics/campaigns/:id/disagreements", requireAdmin, async (req, res) => {
+  app.get("/api/analytics/campaigns/:id/disagreements", requireAuth, async (req, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 50;
       const pairs = await storage.getHighDisagreementPairs(req.params.id, limit);
@@ -630,7 +631,7 @@ export async function registerRoutes(
   });
 
   // Skip analysis for a campaign
-  app.get("/api/analytics/campaigns/:id/skips", requireAdmin, async (req, res) => {
+  app.get("/api/analytics/campaigns/:id/skips", requireAuth, async (req, res) => {
     try {
       const analysis = await storage.getSkipAnalysis(req.params.id);
       res.json(analysis);
@@ -641,7 +642,7 @@ export async function registerRoutes(
   });
 
   // Votes over time (optional campaignId)
-  app.get("/api/analytics/votes-over-time", requireAdmin, async (req, res) => {
+  app.get("/api/analytics/votes-over-time", requireAuth, async (req, res) => {
     try {
       const campaignId = req.query.campaignId as string | undefined;
       const data = await storage.getVotesOverTime(campaignId);
