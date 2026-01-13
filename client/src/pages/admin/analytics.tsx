@@ -263,11 +263,11 @@ function VoteDistributionSection({ data }: { data: VoteDistribution }) {
             <div className="flex justify-center gap-4 text-sm">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded" style={{ backgroundColor: COLORS[0] }} />
-                Binary: {data.binaryVotes.toLocaleString()}
+                Binary: {(data.binaryVotes || 0).toLocaleString()}
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded" style={{ backgroundColor: COLORS[1] }} />
-                Numeric: {data.numericVotes.toLocaleString()}
+                Numeric: {(data.numericVotes || 0).toLocaleString()}
               </div>
             </div>
           </CardContent>
@@ -299,18 +299,18 @@ function VoteDistributionSection({ data }: { data: VoteDistribution }) {
             <div className="flex justify-center gap-4 text-sm">
               <div className="flex items-center gap-2">
                 <CheckCircle className="w-4 h-4 text-primary" />
-                Match: {data.matchVotes.toLocaleString()}
+                Match: {(data.matchVotes || 0).toLocaleString()}
               </div>
               <div className="flex items-center gap-2">
                 <XCircle className="w-4 h-4 text-destructive" />
-                No Match: {data.noMatchVotes.toLocaleString()}
+                No Match: {(data.noMatchVotes || 0).toLocaleString()}
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
       
-      {data.numericVotes > 0 && (
+      {(data.numericVotes || 0) > 0 && (
         <Card className="border-card-border">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Numeric Score Distribution</CardTitle>
@@ -366,7 +366,7 @@ function ReviewerStatsSection({ data }: { data: ReviewerStat[] }) {
       x: r.positiveRate!,
       y: r.agreementRate!,
       votes: r.totalVotes,
-      hasFlag: r.flags.length > 0,
+      hasFlag: (r.flags || []).length > 0,
     }));
 
   return (
