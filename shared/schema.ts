@@ -9,6 +9,7 @@ export const campaignStatusEnum = pgEnum("campaign_status", ["draft", "active", 
 export const campaignTypeEnum = pgEnum("campaign_type", ["questionnaire_match", "loinc_mapping", "custom"]);
 export const pairTypeEnum = pgEnum("pair_type", ["questionnaire_match", "loinc_mapping"]);
 export const scoringModeEnum = pgEnum("scoring_mode", ["binary", "numeric"]);
+export const binaryScoreEnum = pgEnum("binary_score", ["match", "no_match", "unsure"]);
 
 // Users Table
 export const users = pgTable("users", {
@@ -83,7 +84,7 @@ export const votes = pgTable("votes", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   pairId: uuid("pair_id").references(() => pairs.id).notNull(),
   userId: varchar("user_id", { length: 255 }).references(() => users.id).notNull(),
-  scoreBinary: boolean("score_binary"),
+  scoreBinary: binaryScoreEnum("score_binary"),
   scoreNumeric: integer("score_numeric"),
   scoringMode: scoringModeEnum("scoring_mode").notNull(),
   // Expert selection: alternative LOINC code selected when reviewer disagrees
