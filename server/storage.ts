@@ -319,7 +319,7 @@ export class DatabaseStorage implements IStorage {
         positiveRate: sql<number>`
           CASE 
             WHEN COUNT(${votes.id}) > 0 
-            THEN AVG(CASE WHEN ${votes.scoreBinary} = true THEN 1.0 ELSE 0.0 END)
+            THEN AVG(CASE WHEN ${votes.scoreBinary} = 'match' THEN 1.0 WHEN ${votes.scoreBinary} = 'no_match' THEN 0.0 ELSE NULL END)
             ELSE NULL 
           END
         `,
@@ -339,7 +339,7 @@ export class DatabaseStorage implements IStorage {
             WHEN COUNT(${votes.id}) = 0 THEN 0
             WHEN ${pairs.llmConfidence} < 0.7 AND COUNT(${votes.id}) < 3 THEN 1
             WHEN COUNT(${votes.id}) > 0 AND 
-                 AVG(CASE WHEN ${votes.scoreBinary} = true THEN 1.0 ELSE 0.0 END) BETWEEN 0.4 AND 0.6 THEN 2
+                 AVG(CASE WHEN ${votes.scoreBinary} = 'match' THEN 1.0 WHEN ${votes.scoreBinary} = 'no_match' THEN 0.0 ELSE NULL END) BETWEEN 0.4 AND 0.6 THEN 2
             ELSE 3
           END,
           COUNT(${votes.id}),
@@ -482,10 +482,20 @@ export class DatabaseStorage implements IStorage {
       
       if (pairVotes.length < 2) continue; // Need at least 2 votes to compare
       
-      const positiveVotes = pairVotes.filter(v => v.scoreBinary === true).length;
-      const consensus = positiveVotes > pairVotes.length / 2;
+      // Only count definitive votes (match or no_match) for consensus
+      const definitiveVotes = pairVotes.filter(v => v.scoreBinary === "match" || v.scoreBinary === "no_match");
+      if (definitiveVotes.length < 2) continue;
       
-      if (uv.userVote === consensus) {
+      const positiveVotes = definitiveVotes.filter(v => v.scoreBinary === "match").length;
+      const consensusIsMatch = positiveVotes > definitiveVotes.length / 2;
+      
+      // Compare user's vote to consensus (only if user's vote is definitive)
+      const userVoteIsMatch = uv.userVote === "match";
+      const userVoteIsNoMatch = uv.userVote === "no_match";
+      
+      if (!userVoteIsMatch && !userVoteIsNoMatch) continue; // Skip unsure votes
+      
+      if ((userVoteIsMatch && consensusIsMatch) || (userVoteIsNoMatch && !consensusIsMatch)) {
         agreements++;
       }
       comparablePairs++;
@@ -565,7 +575,7 @@ export class DatabaseStorage implements IStorage {
     const result = [];
     for (const pair of campaignPairs) {
       const pairVotes = await this.getVotesByPair(pair.id);
-      const positiveVotes = pairVotes.filter(v => v.scoreBinary === true).length;
+      const positiveVotes = pairVotes.filter(v => v.scoreBinary === "match").length;
       const positiveRate = pairVotes.length > 0 ? positiveVotes / pairVotes.length : null;
       
       result.push({
@@ -594,8 +604,8 @@ export class DatabaseStorage implements IStorage {
       .select({
         pair: pairs,
         voteCount: sql<number>`COALESCE(COUNT(DISTINCT ${votes.id}), 0)::int`,
-        positiveVotes: sql<number>`COALESCE(SUM(CASE WHEN ${votes.scoreBinary} = true THEN 1 ELSE 0 END), 0)::int`,
-        negativeVotes: sql<number>`COALESCE(SUM(CASE WHEN ${votes.scoreBinary} = false THEN 1 ELSE 0 END), 0)::int`,
+        positiveVotes: sql<number>`COALESCE(SUM(CASE WHEN ${votes.scoreBinary} = 'match' THEN 1 ELSE 0 END), 0)::int`,
+        negativeVotes: sql<number>`COALESCE(SUM(CASE WHEN ${votes.scoreBinary} = 'no_match' THEN 1 ELSE 0 END), 0)::int`,
         skipCount: sql<number>`COALESCE(COUNT(DISTINCT ${skippedPairs.id}), 0)::int`,
       })
       .from(pairs)
@@ -872,8 +882,9 @@ export class DatabaseStorage implements IStorage {
           pairVoteCounts.set(v.pairId, { positive: 0, negative: 0 });
         }
         const counts = pairVoteCounts.get(v.pairId)!;
-        if (v.scoreBinary === true) counts.positive++;
-        else if (v.scoreBinary === false) counts.negative++;
+        if (v.scoreBinary === "match") counts.positive++;
+        else if (v.scoreBinary === "no_match") counts.negative++;
+        // Note: "unsure" votes are not counted as positive or negative
       });
       
       let disagreementCount = 0;
@@ -1045,8 +1056,9 @@ export class DatabaseStorage implements IStorage {
         pairVotes.set(v.pairId, { positive: 0, negative: 0 });
       }
       const counts = pairVotes.get(v.pairId)!;
-      if (v.scoreBinary === true) counts.positive++;
-      else if (v.scoreBinary === false) counts.negative++;
+      if (v.scoreBinary === "match") counts.positive++;
+      else if (v.scoreBinary === "no_match") counts.negative++;
+      // Note: "unsure" votes are not counted as positive or negative
     });
     pairVotes.forEach((counts, pairId) => {
       pairConsensus.set(pairId, counts.positive > counts.negative);
@@ -1068,10 +1080,12 @@ export class DatabaseStorage implements IStorage {
       
       if (v.scoringMode === "binary") {
         stats.binaryVotes.push(v);
-        if (v.scoreBinary === true) stats.positiveCount++;
+        if (v.scoreBinary === "match") stats.positiveCount++;
         
         const consensus = pairConsensus.get(v.pairId);
-        if (consensus !== undefined && v.scoreBinary === consensus) {
+        // For agreement: compare whether vote matches consensus (only definitive votes count)
+        const voteIsPositive = v.scoreBinary === "match" ? true : v.scoreBinary === "no_match" ? false : null;
+        if (consensus !== undefined && voteIsPositive !== null && voteIsPositive === consensus) {
           stats.agreementCount++;
         }
       }
@@ -1156,8 +1170,9 @@ export class DatabaseStorage implements IStorage {
       }
       const stats = pairStats.get(v.pairId)!;
       if (v.scoringMode === "binary") {
-        if (v.scoreBinary === true) stats.positiveVotes++;
-        else if (v.scoreBinary === false) stats.negativeVotes++;
+        if (v.scoreBinary === "match") stats.positiveVotes++;
+        else if (v.scoreBinary === "no_match") stats.negativeVotes++;
+        // Note: "unsure" votes are not counted as positive or negative
       }
       if (v.scoreNumeric) stats.numericScores.push(v.scoreNumeric);
     });

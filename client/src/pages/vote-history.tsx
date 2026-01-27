@@ -27,6 +27,7 @@ import {
   ArrowLeft,
   ThumbsUp,
   ThumbsDown,
+  HelpCircle,
   Edit,
   ExternalLink,
   AlertCircle,
@@ -61,10 +62,15 @@ function VoteCard({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-2">
               {vote.scoringMode === "binary" ? (
-                vote.scoreBinary ? (
+                vote.scoreBinary === "match" ? (
                   <Badge className="bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20">
                     <ThumbsUp className="w-3 h-3 mr-1" />
                     Match
+                  </Badge>
+                ) : vote.scoreBinary === "unsure" ? (
+                  <Badge className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20">
+                    <HelpCircle className="w-3 h-3 mr-1" />
+                    Unsure
                   </Badge>
                 ) : (
                   <Badge className="bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20">
@@ -155,7 +161,7 @@ function EditVoteDialog({
   const [scoringMode, setScoringMode] = useState<"binary" | "numeric">(
     vote?.scoringMode || "binary"
   );
-  const [scoreBinary, setScoreBinary] = useState<boolean | null>(
+  const [scoreBinary, setScoreBinary] = useState<"match" | "no_match" | "unsure" | null>(
     vote?.scoreBinary ?? null
   );
   const [scoreNumeric, setScoreNumeric] = useState<number | null>(
@@ -234,18 +240,27 @@ function EditVoteDialog({
               <Label>Your Vote</Label>
               <div className="flex gap-2">
                 <Button
-                  variant={scoreBinary === false ? "default" : "outline"}
+                  variant={scoreBinary === "no_match" ? "default" : "outline"}
                   className="flex-1"
-                  onClick={() => setScoreBinary(false)}
+                  onClick={() => setScoreBinary("no_match")}
                   data-testid="button-edit-no-match"
                 >
                   <ThumbsDown className="w-4 h-4 mr-2" />
                   No Match
                 </Button>
                 <Button
-                  variant={scoreBinary === true ? "default" : "outline"}
+                  variant={scoreBinary === "unsure" ? "default" : "outline"}
                   className="flex-1"
-                  onClick={() => setScoreBinary(true)}
+                  onClick={() => setScoreBinary("unsure")}
+                  data-testid="button-edit-unsure"
+                >
+                  <HelpCircle className="w-4 h-4 mr-2" />
+                  Unsure
+                </Button>
+                <Button
+                  variant={scoreBinary === "match" ? "default" : "outline"}
+                  className="flex-1"
+                  onClick={() => setScoreBinary("match")}
                   data-testid="button-edit-yes-match"
                 >
                   <ThumbsUp className="w-4 h-4 mr-2" />

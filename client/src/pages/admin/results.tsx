@@ -35,6 +35,7 @@ import {
   ExternalLink,
   ThumbsUp,
   ThumbsDown,
+  HelpCircle,
   AlertTriangle,
   Minus,
 } from "lucide-react";
@@ -182,10 +183,13 @@ function PairDetailDialog({
                 </p>
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <span className="text-green-600">
-                    {data.votes.filter(v => v.scoreBinary === true).length} positive
+                    {data.votes.filter(v => v.scoreBinary === "match").length} positive
                   </span>
                   <span className="text-red-600">
-                    {data.votes.filter(v => v.scoreBinary === false).length} negative
+                    {data.votes.filter(v => v.scoreBinary === "no_match").length} negative
+                  </span>
+                  <span className="text-yellow-600">
+                    {data.votes.filter(v => v.scoreBinary === "unsure").length} unsure
                   </span>
                 </div>
               </div>
@@ -209,8 +213,10 @@ function PairDetailDialog({
                         </TableCell>
                         <TableCell>
                           {vote.scoringMode === "binary" ? (
-                            vote.scoreBinary ? (
+                            vote.scoreBinary === "match" ? (
                               <ThumbsUp className="w-4 h-4 text-green-600" />
+                            ) : vote.scoreBinary === "unsure" ? (
+                              <HelpCircle className="w-4 h-4 text-yellow-600" />
                             ) : (
                               <ThumbsDown className="w-4 h-4 text-red-600" />
                             )

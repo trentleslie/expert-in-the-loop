@@ -96,6 +96,7 @@ migrations/       # Drizzle database migrations
 - **Domain Management UI**: Admin interface to manage allowed OAuth domains
 - **Import Templates**: Save and reuse column mappings for CSV imports
 - **Krippendorff's Alpha**: Inter-rater reliability calculation for campaigns
+- **Three-Way Binary Voting**: Match, No Match, and Unsure options (U keyboard shortcut) with unsure votes excluded from consensus calculations
 
 ### Admin Pages
 - `/admin/database` - SQL query explorer

@@ -30,6 +30,7 @@ import {
   AlertCircle,
   Loader2,
   ExternalLink,
+  HelpCircle,
 } from "lucide-react";
 import type { Campaign, Pair } from "@shared/schema";
 
@@ -201,7 +202,7 @@ function KeyboardShortcuts({ isNumericMode }: { isNumericMode: boolean }) {
   }
   
   return (
-    <div className="flex items-center justify-center gap-6 py-3 text-xs text-muted-foreground">
+    <div className="flex items-center justify-center gap-6 py-3 text-xs text-muted-foreground flex-wrap">
       <div className="flex items-center gap-1.5">
         <Keyboard className="w-3.5 h-3.5" />
         <span>Keyboard shortcuts:</span>
@@ -209,6 +210,10 @@ function KeyboardShortcuts({ isNumericMode }: { isNumericMode: boolean }) {
       <div className="flex items-center gap-1">
         <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">←</kbd>
         <span>No Match</span>
+      </div>
+      <div className="flex items-center gap-1">
+        <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">U</kbd>
+        <span>Unsure</span>
       </div>
       <div className="flex items-center gap-1">
         <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">→</kbd>
@@ -330,11 +335,11 @@ export default function ReviewPage() {
     },
   });
 
-  const handleBinaryVote = useCallback((match: boolean) => {
+  const handleBinaryVote = useCallback((score: "match" | "no_match" | "unsure") => {
     if (pairData?.pair) {
       voteMutation.mutate({ 
         pairId: pairData.pair.id, 
-        scoreBinary: match,
+        scoreBinary: score,
         scoreNumeric: null,
         scoringMode: "binary",
         expertCode: expertSelectedCode,
@@ -376,14 +381,18 @@ export default function ReviewPage() {
           return;
         }
       } else {
-        // Binary mode: arrow keys
+        // Binary mode: arrow keys and U for unsure
         if (e.key === "ArrowLeft") {
           e.preventDefault();
-          handleBinaryVote(false);
+          handleBinaryVote("no_match");
           return;
         } else if (e.key === "ArrowRight") {
           e.preventDefault();
-          handleBinaryVote(true);
+          handleBinaryVote("match");
+          return;
+        } else if (e.key.toLowerCase() === "u") {
+          e.preventDefault();
+          handleBinaryVote("unsure");
           return;
         }
       }
@@ -610,12 +619,12 @@ export default function ReviewPage() {
                   </div>
                 </div>
               ) : (
-                <div className="flex items-center justify-center gap-4">
+                <div className="flex items-center justify-center gap-3 flex-wrap">
                   <Button
                     size="lg"
                     variant="outline"
-                    className="h-14 px-8 gap-3"
-                    onClick={() => handleBinaryVote(false)}
+                    className="h-14 px-6 gap-2"
+                    onClick={() => handleBinaryVote("no_match")}
                     disabled={isSubmitting}
                     data-testid="button-no-match"
                   >
@@ -628,8 +637,23 @@ export default function ReviewPage() {
                   </Button>
                   <Button
                     size="lg"
-                    className="h-14 px-8 gap-3"
-                    onClick={() => handleBinaryVote(true)}
+                    variant="secondary"
+                    className="h-14 px-6 gap-2"
+                    onClick={() => handleBinaryVote("unsure")}
+                    disabled={isSubmitting}
+                    data-testid="button-unsure"
+                  >
+                    {isSubmitting ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <HelpCircle className="w-5 h-5" />
+                    )}
+                    Unsure
+                  </Button>
+                  <Button
+                    size="lg"
+                    className="h-14 px-6 gap-2"
+                    onClick={() => handleBinaryVote("match")}
                     disabled={isSubmitting}
                     data-testid="button-yes-match"
                   >
