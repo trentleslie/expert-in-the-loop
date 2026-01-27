@@ -59,8 +59,9 @@ ORDER BY c.created_at DESC;`,
     sql: `SELECT 
   scoring_mode,
   COUNT(*) as vote_count,
-  COUNT(CASE WHEN score_binary = true THEN 1 END) as positive,
-  COUNT(CASE WHEN score_binary = false THEN 1 END) as negative,
+  COUNT(CASE WHEN score_binary = 'match' THEN 1 END) as positive,
+  COUNT(CASE WHEN score_binary = 'no_match' THEN 1 END) as negative,
+  COUNT(CASE WHEN score_binary = 'unsure' THEN 1 END) as unsure,
   AVG(score_numeric) as avg_numeric_score
 FROM votes
 GROUP BY scoring_mode;`,
@@ -72,8 +73,9 @@ GROUP BY scoring_mode;`,
   u.email,
   u.display_name,
   COUNT(v.id) as total_votes,
-  COUNT(CASE WHEN v.score_binary = true THEN 1 END) as positive_votes,
-  COUNT(CASE WHEN v.score_binary = false THEN 1 END) as negative_votes
+  COUNT(CASE WHEN v.score_binary = 'match' THEN 1 END) as positive_votes,
+  COUNT(CASE WHEN v.score_binary = 'no_match' THEN 1 END) as negative_votes,
+  COUNT(CASE WHEN v.score_binary = 'unsure' THEN 1 END) as unsure_votes
 FROM users u
 LEFT JOIN votes v ON u.id = v.user_id
 GROUP BY u.id
@@ -81,17 +83,18 @@ ORDER BY total_votes DESC;`,
   },
   {
     name: "High Disagreement Pairs",
-    description: "Pairs with 40-60% positive rate (3+ votes)",
+    description: "Pairs with 40-60% positive rate (3+ votes, excluding unsure)",
     sql: `SELECT 
   p.source_text,
   p.target_text,
   COUNT(v.id) as vote_count,
-  AVG(CASE WHEN v.score_binary THEN 1.0 ELSE 0.0 END) as positive_rate
+  AVG(CASE WHEN v.score_binary = 'match' THEN 1.0 WHEN v.score_binary = 'no_match' THEN 0.0 END) as positive_rate
 FROM pairs p
 INNER JOIN votes v ON p.id = v.pair_id
+WHERE v.score_binary IN ('match', 'no_match')
 GROUP BY p.id
 HAVING COUNT(v.id) >= 3 
-  AND AVG(CASE WHEN v.score_binary THEN 1.0 ELSE 0.0 END) BETWEEN 0.4 AND 0.6
+  AND AVG(CASE WHEN v.score_binary = 'match' THEN 1.0 ELSE 0.0 END) BETWEEN 0.4 AND 0.6
 ORDER BY vote_count DESC
 LIMIT 50;`,
   },
