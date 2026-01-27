@@ -62,16 +62,42 @@ function LoincLink({ code, className }: { code: string; className?: string }) {
   );
 }
 
-function parseTop5Loinc(value: unknown): string[] {
+type LoincAlternative = {
+  code: string;
+  name?: string;
+  confidence?: number;
+  vector_similarity?: number;
+};
+
+function parseTop5Loinc(value: unknown): LoincAlternative[] {
   if (!value) return [];
   try {
     if (typeof value === "string") {
-      // Handle Python-style list string: "['code1', 'code2']"
+      // Handle Python-style list string: "['code1', 'code2']" or JSON array
       const cleaned = value.replace(/'/g, '"');
-      return JSON.parse(cleaned) as string[];
+      const parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => {
+          if (typeof item === "string") {
+            return { code: item };
+          }
+          if (typeof item === "object" && item !== null && item.code) {
+            return item as LoincAlternative;
+          }
+          return null;
+        }).filter((item): item is LoincAlternative => item !== null);
+      }
     }
     if (Array.isArray(value)) {
-      return value as string[];
+      return value.map((item) => {
+        if (typeof item === "string") {
+          return { code: item };
+        }
+        if (typeof item === "object" && item !== null && (item as any).code) {
+          return item as LoincAlternative;
+        }
+        return null;
+      }).filter((item): item is LoincAlternative => item !== null);
     }
   } catch {
     return [];
@@ -132,9 +158,19 @@ function EntityCard({
           {top5Loinc.length > 0 && (
             <div className="pt-2">
               <p className="text-xs text-muted-foreground mb-1">Alternative LOINC suggestions:</p>
-              <div className="flex flex-wrap gap-2">
-                {top5Loinc.map((code) => (
-                  <LoincLink key={code} code={code} className="text-xs font-mono" />
+              <div className="flex flex-col gap-1">
+                {top5Loinc.map((alt) => (
+                  <div key={alt.code} className="flex items-center gap-2 text-xs">
+                    <LoincLink code={alt.code} className="font-mono shrink-0" />
+                    {alt.name && (
+                      <span className="text-muted-foreground truncate">{alt.name}</span>
+                    )}
+                    {alt.confidence !== undefined && (
+                      <Badge variant="secondary" className="text-xs shrink-0">
+                        {(alt.confidence * 100).toFixed(0)}%
+                      </Badge>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>
@@ -536,9 +572,12 @@ export default function ReviewPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">None (use LLM suggestion)</SelectItem>
-                      {parseTop5Loinc(pairData.pair.targetMetadata?.top_5_loinc).map((code) => (
-                        <SelectItem key={code} value={code}>
-                          <span className="font-mono">{code}</span>
+                      {parseTop5Loinc(pairData.pair.targetMetadata?.top_5_loinc).map((alt) => (
+                        <SelectItem key={alt.code} value={alt.code}>
+                          <span className="flex items-center gap-2">
+                            <span className="font-mono">{alt.code}</span>
+                            {alt.name && <span className="text-muted-foreground text-xs truncate max-w-48">{alt.name}</span>}
+                          </span>
                         </SelectItem>
                       ))}
                     </SelectContent>
