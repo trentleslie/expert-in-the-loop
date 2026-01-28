@@ -47,8 +47,10 @@ export function setupAuth(app: Express) {
 
   // Only configure Google OAuth if credentials are provided
   if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
-    // Use REPLIT_DEV_DOMAIN for development or REPLIT_DEPLOYMENT_URL for production
     const getCallbackURL = () => {
+      if (process.env.APP_URL) {
+        return `${process.env.APP_URL}/api/auth/google/callback`;
+      }
       if (process.env.REPLIT_DEPLOYMENT_URL) {
         return `https://${process.env.REPLIT_DEPLOYMENT_URL}/api/auth/google/callback`;
       }
