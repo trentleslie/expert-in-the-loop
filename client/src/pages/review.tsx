@@ -143,7 +143,7 @@ function EntityCard({
         </div>
       </CardHeader>
       <CardContent className="flex-1 flex flex-col">
-        <p className="text-lg text-foreground leading-relaxed flex-1" data-testid={`text-entity-${type}`}>
+        <p className="text-lg text-foreground leading-relaxed flex-1 break-words overflow-hidden" data-testid={`text-entity-${type}`}>
           {text}
         </p>
         <div className="mt-4 pt-3 border-t border-border space-y-2">
@@ -153,7 +153,7 @@ function EntityCard({
           {displayMetadata.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {displayMetadata.map(([key, value]) => (
-                <Badge key={key} variant="secondary" className="text-xs">
+                <Badge key={key} variant="secondary" className="text-xs max-w-full break-words whitespace-normal">
                   {key}: {String(value)}
                 </Badge>
               ))}
