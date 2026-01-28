@@ -226,9 +226,9 @@ export default function DatabaseExplorerPage() {
                     onClick={() => handleQuickQuery(q.sql)}
                     data-testid={`button-quick-query-${q.name.toLowerCase().replace(/\s/g, "-")}`}
                   >
-                    <div>
-                      <p className="text-sm font-medium">{q.name}</p>
-                      <p className="text-xs text-muted-foreground">{q.description}</p>
+                    <div className="min-w-0 overflow-hidden">
+                      <p className="text-sm font-medium break-words">{q.name}</p>
+                      <p className="text-xs text-muted-foreground break-words whitespace-normal">{q.description}</p>
                     </div>
                   </Button>
                 ))}
