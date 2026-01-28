@@ -47,6 +47,10 @@ type NextPairResponse = {
 };
 
 function LoincLink({ code, className }: { code: string; className?: string }) {
+  // Don't render as a link for special values like NO_MATCH
+  if (!code || code === "NO_MATCH" || code.startsWith("NO_")) {
+    return <span className={`font-mono ${className || ""}`}>{code}</span>;
+  }
   const loincUrl = `https://loinc.org/${code}`;
   return (
     <a 
