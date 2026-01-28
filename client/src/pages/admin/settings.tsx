@@ -81,7 +81,7 @@ function AddDomainDialog({ onSuccess }: { onSuccess: () => void }) {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Input
-              placeholder="e.g., phenomehealth.org"
+              placeholder="e.g., expertintheloop.io"
               value={domain}
               onChange={(e) => setDomain(e.target.value)}
               data-testid="input-domain"

@@ -109,7 +109,7 @@ function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
         <DialogHeader>
           <DialogTitle>Create New Campaign</DialogTitle>
           <DialogDescription>
-            Set up a new validation campaign for entity mapping review.
+            Set up a new validation campaign for expert review.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -544,7 +544,7 @@ export default function AdminCampaigns() {
                   </div>
                   <h3 className="text-lg font-medium text-foreground mb-2">No Campaigns Yet</h3>
                   <p className="text-sm text-muted-foreground text-center max-w-sm mb-4">
-                    Create your first campaign to start collecting human feedback on entity mappings.
+                    Create your first campaign to start collecting expert feedback on mappings.
                   </p>
                   <CreateCampaignDialog onSuccess={handleRefresh} />
                 </CardContent>

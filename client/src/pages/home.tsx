@@ -169,7 +169,7 @@ export default function HomePage() {
             Welcome back, {user?.displayName?.split(" ")[0] || "Reviewer"}
           </h1>
           <p className="text-muted-foreground">
-            Continue reviewing entity mappings or explore active campaigns
+            Continue reviewing mappings or explore active campaigns
           </p>
         </div>
 

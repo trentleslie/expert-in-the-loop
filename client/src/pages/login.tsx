@@ -35,10 +35,10 @@ export default function LoginPage() {
             <Database className="w-8 h-8 text-primary" />
           </div>
           <h1 className="text-2xl font-semibold text-foreground mb-2">
-            Entity Mapping Validator
+            Expert in the Loop
           </h1>
           <p className="text-muted-foreground text-sm max-w-md mx-auto">
-            Human-in-the-loop validation for biomedical data harmonization
+            Human expert validation for biomedical entity mappings
           </p>
         </div>
 
@@ -101,7 +101,7 @@ export default function LoginPage() {
             <div className="flex items-start gap-3 p-3 rounded-lg bg-card border border-card-border">
               <CheckCircle className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
               <div>
-                <p className="text-sm font-medium text-foreground">Review Entity Mappings</p>
+                <p className="text-sm font-medium text-foreground">Review Mappings</p>
                 <p className="text-xs text-muted-foreground">
                   Validate LLM-suggested matches between biomedical questionnaires and LOINC codes
                 </p>

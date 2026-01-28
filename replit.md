@@ -1,8 +1,8 @@
-# Entity Mapping Validator
+# Expert in the Loop (EITL)
 
 ## Overview
 
-A web application for collecting human-reviewed feedback on LLM-generated biomedical entity mappings. The system enables domain experts to validate proposed matches between questionnaire items (cross-questionnaire matching) and LOINC code mappings. This serves as the human-in-the-loop validation component for building gold standard datasets used to train and evaluate embedding models.
+**Expert in the Loop** (EITL) is a web application at expertintheloop.io for collecting human-reviewed feedback on LLM-generated biomedical entity mappings. The system enables domain experts to validate proposed matches between questionnaire items (cross-questionnaire matching) and LOINC code mappings. This serves as the human-in-the-loop validation component for building gold standard datasets used to train and evaluate embedding models.
 
 ## User Preferences
 
@@ -35,7 +35,7 @@ Preferred communication style: Simple, everyday language.
 
 ### Authentication & Authorization
 - **Provider**: Google OAuth 2.0 with domain restriction
-- **Allowed Domains**: Configurable (default: phenomehealth.org)
+- **Allowed Domains**: Configurable (default: expertintheloop.io)
 - **Roles**: 
   - `reviewer`: Can review pairs, view personal stats
   - `admin`: Full access including campaign management, data export, user management
