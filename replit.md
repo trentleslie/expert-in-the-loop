@@ -2,7 +2,15 @@
 
 ## Overview
 
-**Expert in the Loop** (EITL) is a web application at expertintheloop.io for collecting human-reviewed feedback on LLM-generated biomedical entity mappings. The system enables domain experts to validate proposed matches between questionnaire items (cross-questionnaire matching) and LOINC code mappings. This serves as the human-in-the-loop validation component for building gold standard datasets used to train and evaluate embedding models.
+**Expert in the Loop** (EITL) is a platform at expertintheloop.io for collecting structured human feedback on AI-generated outputs. Use it to:
+
+- Validate LLM-suggested matches and mappings
+- Review AI classifications and categorizations
+- Evaluate agent-generated recommendations
+- Build calibrated ground truth datasets
+- Measure inter-rater reliability across expert reviewers
+
+Designed for teams who need systematic human review to evaluate, improve, and trust their AI systems. Common use cases include: biomedical ontology mapping, legal document review, content moderation QA, and product recommendation validation.
 
 ## User Preferences
 

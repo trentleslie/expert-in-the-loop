@@ -33,10 +33,10 @@ function CampaignCard({ campaign }: { campaign: CampaignWithStats }) {
 
   const getTypeLabel = (type: string) => {
     switch (type) {
-      case "questionnaire_match": return "Questionnaire Matching";
-      case "loinc_mapping": return "LOINC Mapping";
+      case "questionnaire_match": return "Match Validation";
+      case "loinc_mapping": return "Mapping Review";
       case "custom": return "Custom";
-      default: return type;
+      default: return type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     }
   };
 

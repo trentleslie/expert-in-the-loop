@@ -1,0 +1,43 @@
+Please update the branding to be more general-purpose. Expert in the Loop (EITL) should be positioned as a general tool for collecting human expert feedback on LLM and AI agent outputs, not specifically biomedical entity validation. Biomedical mapping is just one use case.
+Updated branding language:
+Page Title & Meta:
+
+Title: "Expert in the Loop | Human Review for AI Outputs"
+Meta description: "Collect structured human expert feedback on LLM-generated matches, classifications, and recommendations. Build gold standard datasets to evaluate and improve AI systems."
+
+Login Page:
+
+Main heading: "Expert in the Loop"
+Tagline: "Human expert validation for AI-generated outputs"
+Subtext (optional): "Build gold standard datasets through structured expert review of LLM matches, classifications, and recommendations."
+
+About/Description text (for footer, about page, or onboarding):
+Expert in the Loop (EITL) is a platform for collecting structured human feedback 
+on AI-generated outputs. Use it to:
+
+- Validate LLM-suggested matches and mappings
+- Review AI classifications and categorizations  
+- Evaluate agent-generated recommendations
+- Build calibrated ground truth datasets
+- Measure inter-rater reliability across expert reviewers
+
+Designed for teams who need systematic human review to evaluate, improve, 
+and trust their AI systems.
+UI text replacements:
+
+"Biomedical entity mapping validation" → "AI output validation"
+"entity mappings" → "AI-generated pairs" or just "pairs"
+"biomedical" → remove or replace with "expert"
+Domain placeholder: keep "expertintheloop.io"
+
+Campaign type labels (keep flexible):
+
+Instead of hardcoding "questionnaire_match" and "loinc_mapping" as the only types, the UI should treat campaign_type as a user-defined string
+Example types: "match_validation", "classification_review", "recommendation_quality", "extraction_accuracy", etc.
+
+Color scheme / visual identity:
+
+Keep it professional and neutral (not specifically medical/clinical looking)
+Suggest: Clean blues/grays, or a subtle purple accent to suggest AI/intelligence without being too "techy"
+
+The goal is that someone using this for legal document review, content moderation QA, or product recommendation validation would feel equally at home as someone doing biomedical ontology mapping.

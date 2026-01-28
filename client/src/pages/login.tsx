@@ -38,7 +38,10 @@ export default function LoginPage() {
             Expert in the Loop
           </h1>
           <p className="text-muted-foreground text-sm max-w-md mx-auto">
-            Human expert validation for biomedical entity mappings
+            Human expert validation for AI-generated outputs
+          </p>
+          <p className="text-muted-foreground text-xs max-w-sm mx-auto mt-2">
+            Build gold standard datasets through structured expert review of LLM matches, classifications, and recommendations.
           </p>
         </div>
 
@@ -101,9 +104,9 @@ export default function LoginPage() {
             <div className="flex items-start gap-3 p-3 rounded-lg bg-card border border-card-border">
               <CheckCircle className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
               <div>
-                <p className="text-sm font-medium text-foreground">Review Mappings</p>
+                <p className="text-sm font-medium text-foreground">Review AI Outputs</p>
                 <p className="text-xs text-muted-foreground">
-                  Validate LLM-suggested matches between biomedical questionnaires and LOINC codes
+                  Validate LLM-suggested matches, classifications, and recommendations
                 </p>
               </div>
             </div>
@@ -112,16 +115,16 @@ export default function LoginPage() {
               <div>
                 <p className="text-sm font-medium text-foreground">Build Gold Standards</p>
                 <p className="text-xs text-muted-foreground">
-                  Your feedback helps train embedding models and calibrate automated systems
+                  Your feedback helps evaluate and improve AI systems
                 </p>
               </div>
             </div>
             <div className="flex items-start gap-3 p-3 rounded-lg bg-card border border-card-border">
               <ArrowRight className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
               <div>
-                <p className="text-sm font-medium text-foreground">Quick Binary Decisions</p>
+                <p className="text-sm font-medium text-foreground">Efficient Review Workflow</p>
                 <p className="text-xs text-muted-foreground">
-                  Simple yes/no matching with keyboard shortcuts for efficient reviewing
+                  Keyboard shortcuts and structured scoring for rapid expert validation
                 </p>
               </div>
             </div>

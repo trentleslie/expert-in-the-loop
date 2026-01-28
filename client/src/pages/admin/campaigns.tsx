@@ -61,7 +61,7 @@ import {
 const createCampaignSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
   description: z.string().max(500).optional(),
-  campaignType: z.enum(["questionnaire_match", "loinc_mapping", "custom"]),
+  campaignType: z.enum(["match_validation", "classification_review", "recommendation_quality", "custom"]),
 });
 
 type CreateCampaignForm = z.infer<typeof createCampaignSchema>;
@@ -75,7 +75,7 @@ function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
     defaultValues: {
       name: "",
       description: "",
-      campaignType: "questionnaire_match",
+      campaignType: "match_validation",
     },
   });
 
@@ -122,7 +122,7 @@ function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
                   <FormLabel>Campaign Name</FormLabel>
                   <FormControl>
                     <Input 
-                      placeholder="e.g., Arivale-UKBB Questionnaire Matching" 
+                      placeholder="e.g., Q4 Product Recommendations Review" 
                       {...field}
                       data-testid="input-campaign-name"
                     />
@@ -163,8 +163,9 @@ function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="questionnaire_match">Questionnaire Matching</SelectItem>
-                      <SelectItem value="loinc_mapping">LOINC Mapping</SelectItem>
+                      <SelectItem value="match_validation">Match Validation</SelectItem>
+                      <SelectItem value="classification_review">Classification Review</SelectItem>
+                      <SelectItem value="recommendation_quality">Recommendation Quality</SelectItem>
                       <SelectItem value="custom">Custom</SelectItem>
                     </SelectContent>
                   </Select>

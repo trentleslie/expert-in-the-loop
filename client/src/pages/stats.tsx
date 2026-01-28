@@ -199,8 +199,8 @@ export default function StatsPage() {
                       Keep Contributing!
                     </h3>
                     <p className="text-sm text-muted-foreground mt-1">
-                      Your reviews help build gold standard datasets for biomedical data harmonization. 
-                      Each vote contributes to training better embedding models and calibrating automated evaluation systems.
+                      Your reviews help build gold standard datasets to evaluate and improve AI systems. 
+                      Each vote contributes to calibrating automated systems and measuring model quality.
                     </p>
                   </div>
                 </div>

@@ -157,7 +157,7 @@ function EntityCard({
           )}
           {top5Loinc.length > 0 && (
             <div className="pt-2">
-              <p className="text-xs text-muted-foreground mb-1">Alternative LOINC suggestions:</p>
+              <p className="text-xs text-muted-foreground mb-1">Alternative suggestions:</p>
               <div className="flex flex-col gap-1">
                 {top5Loinc.map((alt) => (
                   <div key={alt.code} className="flex items-center gap-2 text-xs">
@@ -558,20 +558,20 @@ export default function ReviewPage() {
             {/* Expert selection and notes */}
             <Card className="border-card-border">
               <CardContent className="p-4 space-y-4">
-                {/* Expert LOINC selection */}
+                {/* Expert alternative selection */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">
-                    Suggest alternative LOINC code (optional)
+                    Suggest alternative match (optional)
                   </label>
                   <Select
                     value={expertSelectedCode || "none"}
                     onValueChange={(value) => setExpertSelectedCode(value === "none" ? null : value)}
                   >
                     <SelectTrigger data-testid="select-expert-code">
-                      <SelectValue placeholder="Select from top 5 suggestions..." />
+                      <SelectValue placeholder="Select from alternatives..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">None (use LLM suggestion)</SelectItem>
+                      <SelectItem value="none">None (use AI suggestion)</SelectItem>
                       {parseTop5Loinc(pairData.pair.targetMetadata?.top_5_loinc).map((alt) => (
                         <SelectItem key={alt.code} value={alt.code}>
                           <span className="flex items-center gap-2">
@@ -583,7 +583,7 @@ export default function ReviewPage() {
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    If the LLM's match isn't correct, select a better LOINC code from the alternatives
+                    If the AI's suggestion isn't correct, select a better match from the alternatives
                   </p>
                 </div>
 
