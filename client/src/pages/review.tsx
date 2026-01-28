@@ -249,7 +249,7 @@ function KeyboardShortcuts({ isNumericMode }: { isNumericMode: boolean }) {
       </div>
       <div className="flex items-center gap-1">
         <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">←</kbd>
-        <span>No Match</span>
+        <span>Reject</span>
       </div>
       <div className="flex items-center gap-1">
         <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">U</kbd>
@@ -257,7 +257,7 @@ function KeyboardShortcuts({ isNumericMode }: { isNumericMode: boolean }) {
       </div>
       <div className="flex items-center gap-1">
         <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">→</kbd>
-        <span>Yes Match</span>
+        <span>Confirm</span>
       </div>
       <div className="flex items-center gap-1">
         <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">↓</kbd>
@@ -676,7 +676,7 @@ export default function ReviewPage() {
                     ) : (
                       <ThumbsDown className="w-5 h-5" />
                     )}
-                    No Match
+                    Reject
                   </Button>
                   <Button
                     size="lg"
@@ -705,7 +705,7 @@ export default function ReviewPage() {
                     ) : (
                       <ThumbsUp className="w-5 h-5" />
                     )}
-                    Yes Match
+                    Confirm
                   </Button>
                 </div>
               )}

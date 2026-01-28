@@ -65,7 +65,7 @@ function VoteCard({
                 vote.scoreBinary === "match" ? (
                   <Badge className="bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20">
                     <ThumbsUp className="w-3 h-3 mr-1" />
-                    Match
+                    Confirmed
                   </Badge>
                 ) : vote.scoreBinary === "unsure" ? (
                   <Badge className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20">
@@ -75,7 +75,7 @@ function VoteCard({
                 ) : (
                   <Badge className="bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20">
                     <ThumbsDown className="w-3 h-3 mr-1" />
-                    No Match
+                    Rejected
                   </Badge>
                 )
               ) : (
@@ -246,7 +246,7 @@ function EditVoteDialog({
                   data-testid="button-edit-no-match"
                 >
                   <ThumbsDown className="w-4 h-4 mr-2" />
-                  No Match
+                  Reject
                 </Button>
                 <Button
                   variant={scoreBinary === "unsure" ? "default" : "outline"}
@@ -264,7 +264,7 @@ function EditVoteDialog({
                   data-testid="button-edit-yes-match"
                 >
                   <ThumbsUp className="w-4 h-4 mr-2" />
-                  Match
+                  Confirm
                 </Button>
               </div>
             </div>

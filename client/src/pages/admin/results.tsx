@@ -76,7 +76,7 @@ function ConsensusIndicator({ rate }: { rate: number | null }) {
     return (
       <Badge className="gap-1 bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20">
         <ThumbsUp className="w-3 h-3" />
-        Match
+        Confirmed
       </Badge>
     );
   }
@@ -84,7 +84,7 @@ function ConsensusIndicator({ rate }: { rate: number | null }) {
     return (
       <Badge className="gap-1 bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20">
         <ThumbsDown className="w-3 h-3" />
-        No Match
+        Rejected
       </Badge>
     );
   }
@@ -339,8 +339,8 @@ export default function ResultsBrowserPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="match">Match</SelectItem>
-                  <SelectItem value="no_match">No Match</SelectItem>
+                  <SelectItem value="match">Confirmed</SelectItem>
+                  <SelectItem value="no_match">Rejected</SelectItem>
                   <SelectItem value="disagreement">Disagreement</SelectItem>
                   <SelectItem value="unreviewed">Unreviewed</SelectItem>
                 </SelectContent>
