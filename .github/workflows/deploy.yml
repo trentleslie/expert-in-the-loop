@@ -1,0 +1,33 @@
+name: Deploy to Lightsail
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" | base64 -d > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+        env:
+          SSH_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+
+      - name: Deploy to Lightsail
+        env:
+          SSH_USER: ${{ secrets.LIGHTSAIL_USER }}
+          SSH_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key "$SSH_USER@$SSH_HOST" << 'DEPLOY_SCRIPT'
+          cd ~/expert-in-the-loop
+          git pull origin main
+          npm ci
+          npm run build
+          sudo systemctl restart expert-in-the-loop
+          sleep 5
+          curl -s -o /dev/null -w "%{http_code}" http://localhost:5000 | grep -q "200" && echo "✅ App healthy" || echo "❌ App failed to start"
+          DEPLOY_SCRIPT
