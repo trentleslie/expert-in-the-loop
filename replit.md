@@ -94,9 +94,15 @@ migrations/       # Drizzle database migrations
 - **@radix-ui/***: Accessible UI primitives
 - **tailwindcss**: Utility-first CSS framework
 
-## Recent Changes (January 2026)
+## Recent Changes (February 2026)
+
+### Terminology & Branding
+- **Voting buttons**: Changed from "Match"/"No Match" to "Confirm"/"Reject" (with "Unsure" unchanged) across review page, vote history, and results browser
+- **Campaign types**: Changed from fixed enum to free-text field with autocomplete suggestions — users can define any campaign type (e.g., "contract_clause_review", "product_categorization")
+- **Platform rebrand**: General-purpose AI validation platform (not biomedical-specific)
 
 ### New Features Added
+- **Flexible Campaign Types**: Free-text input with combobox autocomplete showing previously-used types plus default suggestions
 - **Numeric Scoring Mode**: 1-5 scale option with toggle switch, keyboard shortcuts (1-5)
 - **Vote History & Editing**: View and edit past votes with full history tracking
 - **Results Browser**: Admin page with filterable/paginated table of pairs, vote counts, agreement rates
@@ -104,7 +110,7 @@ migrations/       # Drizzle database migrations
 - **Domain Management UI**: Admin interface to manage allowed OAuth domains
 - **Import Templates**: Save and reuse column mappings for CSV imports
 - **Krippendorff's Alpha**: Inter-rater reliability calculation for campaigns
-- **Three-Way Binary Voting**: Match, No Match, and Unsure options (U keyboard shortcut) with unsure votes excluded from consensus calculations
+- **Three-Way Binary Voting**: Confirm, Reject, and Unsure options (Y/N/U keyboard shortcuts) with unsure votes excluded from consensus calculations
 
 ### Admin Pages
 - `/admin/database` - SQL query explorer
@@ -112,6 +118,7 @@ migrations/       # Drizzle database migrations
 - `/admin/campaigns/:id/results` - Campaign results browser
 
 ### API Endpoints Added
+- `GET /api/campaign-types` - Distinct campaign types for autocomplete
 - `GET /api/users/me/votes` - User's vote history
 - `PATCH /api/pairs/:id/vote` - Edit existing vote
 - `GET /api/campaigns/:id/alpha` - Krippendorff's Alpha calculation
