@@ -28,6 +28,7 @@ export interface IStorage {
   getCampaignsWithStats(): Promise<CampaignWithStats[]>;
   createCampaign(campaign: InsertCampaign): Promise<Campaign>;
   updateCampaignStatus(id: string, status: Campaign["status"]): Promise<void>;
+  getDistinctCampaignTypes(): Promise<string[]>;
   
   // Pairs
   getPair(id: string): Promise<Pair | undefined>;
@@ -283,6 +284,14 @@ export class DatabaseStorage implements IStorage {
 
   async updateCampaignStatus(id: string, status: Campaign["status"]): Promise<void> {
     await db.update(campaigns).set({ status }).where(eq(campaigns.id, id));
+  }
+
+  async getDistinctCampaignTypes(): Promise<string[]> {
+    const result = await db
+      .selectDistinct({ campaignType: campaigns.campaignType })
+      .from(campaigns)
+      .orderBy(campaigns.campaignType);
+    return result.map(r => r.campaignType);
   }
 
   // Pairs

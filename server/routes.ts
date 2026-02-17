@@ -86,6 +86,17 @@ export async function registerRoutes(
     }
   });
 
+  // Get distinct campaign types for autocomplete
+  app.get("/api/campaign-types", requireAuth, async (req, res) => {
+    try {
+      const types = await storage.getDistinctCampaignTypes();
+      res.json(types);
+    } catch (error) {
+      console.error("Error fetching campaign types:", error);
+      res.status(500).json({ message: "Failed to fetch campaign types" });
+    }
+  });
+
   // Get single campaign
   app.get("/api/campaigns/:id", requireAuth, async (req, res) => {
     try {

@@ -6,7 +6,6 @@ import { z } from "zod";
 // Enums
 export const userRoleEnum = pgEnum("user_role", ["reviewer", "admin"]);
 export const campaignStatusEnum = pgEnum("campaign_status", ["draft", "active", "completed", "archived"]);
-export const campaignTypeEnum = pgEnum("campaign_type", ["questionnaire_match", "loinc_mapping", "custom"]);
 export const pairTypeEnum = pgEnum("pair_type", ["questionnaire_match", "loinc_mapping"]);
 export const scoringModeEnum = pgEnum("scoring_mode", ["binary", "numeric"]);
 export const binaryScoreEnum = pgEnum("binary_score", ["match", "no_match", "unsure"]);
@@ -31,7 +30,7 @@ export const campaigns = pgTable("campaigns", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   description: text("description"),
-  campaignType: campaignTypeEnum("campaign_type").notNull(),
+  campaignType: text("campaign_type").notNull(),
   createdBy: varchar("created_by", { length: 255 }).references(() => users.id).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   status: campaignStatusEnum("status").notNull().default("draft"),

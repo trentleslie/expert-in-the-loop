@@ -19,13 +19,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -61,10 +54,71 @@ import {
 const createCampaignSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
   description: z.string().max(500).optional(),
-  campaignType: z.enum(["match_validation", "classification_review", "recommendation_quality", "custom"]),
+  campaignType: z.string().min(1, "Campaign type is required").max(50, "Campaign type must be 50 characters or less"),
 });
 
 type CreateCampaignForm = z.infer<typeof createCampaignSchema>;
+
+function CampaignTypeCombobox({ value, onChange }: { value: string; onChange: (val: string) => void }) {
+  const [inputValue, setInputValue] = useState(value);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const { data: existingTypes = [] } = useQuery<string[]>({
+    queryKey: ["/api/campaign-types"],
+  });
+
+  const defaultSuggestions = ["match_validation", "classification_review", "recommendation_quality", "loinc_mapping", "custom"];
+  const allTypes = Array.from(new Set([...existingTypes, ...defaultSuggestions])).sort();
+
+  const filtered = allTypes.filter(t =>
+    t.toLowerCase().includes(inputValue.toLowerCase())
+  );
+
+  const handleSelect = (type: string) => {
+    setInputValue(type);
+    onChange(type);
+    setShowSuggestions(false);
+  };
+
+  const handleInputChange = (val: string) => {
+    setInputValue(val);
+    onChange(val);
+    setShowSuggestions(true);
+  };
+
+  const formatLabel = (type: string) =>
+    type.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
+  return (
+    <div className="relative">
+      <Input
+        value={inputValue}
+        onChange={(e) => handleInputChange(e.target.value)}
+        onFocus={() => setShowSuggestions(true)}
+        onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+        placeholder="e.g., match_validation, contract_review"
+        data-testid="input-campaign-type"
+      />
+      {showSuggestions && filtered.length > 0 && (
+        <div className="absolute z-50 w-full mt-1 bg-popover border border-border rounded-md shadow-md max-h-48 overflow-y-auto">
+          {filtered.map((type) => (
+            <button
+              key={type}
+              type="button"
+              className="w-full text-left px-3 py-2 text-sm hover-elevate cursor-pointer"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleSelect(type)}
+              data-testid={`option-type-${type}`}
+            >
+              <span className="font-medium">{formatLabel(type)}</span>
+              <span className="text-xs text-muted-foreground ml-2 font-mono">{type}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
   const [open, setOpen] = useState(false);
@@ -75,7 +129,7 @@ function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
     defaultValues: {
       name: "",
       description: "",
-      campaignType: "match_validation",
+      campaignType: "",
     },
   });
 
@@ -156,19 +210,12 @@ function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Campaign Type</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
-                    <FormControl>
-                      <SelectTrigger data-testid="select-campaign-type">
-                        <SelectValue placeholder="Select type" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="match_validation">Match Validation</SelectItem>
-                      <SelectItem value="classification_review">Classification Review</SelectItem>
-                      <SelectItem value="recommendation_quality">Recommendation Quality</SelectItem>
-                      <SelectItem value="custom">Custom</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <FormControl>
+                    <CampaignTypeCombobox
+                      value={field.value}
+                      onChange={field.onChange}
+                    />
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
