@@ -33,6 +33,7 @@ export interface IStorage {
   // Pairs
   getPair(id: string): Promise<Pair | undefined>;
   createPairs(pairsData: InsertPair[]): Promise<number>;
+  getPairIdentifiers(campaignId: string): Promise<{ sourceId: string; targetId: string }[]>;
   getNextPairForUser(campaignId: string, userId: string): Promise<Pair | null>;
   getPairsCount(campaignId: string): Promise<number>;
   getReviewedPairsCount(campaignId: string): Promise<number>;
@@ -306,6 +307,13 @@ export class DatabaseStorage implements IStorage {
     return inserted.length;
   }
 
+  async getPairIdentifiers(campaignId: string): Promise<{ sourceId: string; targetId: string }[]> {
+    return db
+      .select({ sourceId: pairs.sourceId, targetId: pairs.targetId })
+      .from(pairs)
+      .where(eq(pairs.campaignId, campaignId));
+  }
+
   async getNextPairForUser(campaignId: string, userId: string): Promise<Pair | null> {
     // Get IDs of pairs user has already voted on or skipped
     const userVotes = await db
@@ -412,15 +420,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateVote(
-    pairId: string, 
-    userId: string, 
+    pairId: string,
+    userId: string,
     updates: Partial<Pick<Vote, "scoreBinary" | "scoreNumeric" | "scoringMode" | "expertSelectedCode" | "reviewerNotes">>
   ): Promise<Vote | null> {
-    const updateData: Record<string, unknown> = { ...updates };
-    updateData.updatedAt = new Date();
     const [updated] = await db
       .update(votes)
-      .set(updateData)
+      .set({ ...updates, updatedAt: new Date() })
       .where(and(eq(votes.pairId, pairId), eq(votes.userId, userId)))
       .returning();
     return updated || null;

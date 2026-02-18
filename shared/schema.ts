@@ -31,6 +31,8 @@ export const campaigns = pgTable("campaigns", {
   name: text("name").notNull(),
   description: text("description"),
   campaignType: text("campaign_type").notNull(),
+  // Reviewer instructions shown on the review page
+  instructions: text("instructions"),
   createdBy: varchar("created_by", { length: 255 }).references(() => users.id).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   status: campaignStatusEnum("status").notNull().default("draft"),
@@ -91,6 +93,7 @@ export const votes = pgTable("votes", {
   // Reviewer notes/reasoning for their decision
   reviewerNotes: text("reviewer_notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").$onUpdate(() => new Date()),
 }, (table) => ({
   uniqueUserPair: unique().on(table.pairId, table.userId),
 }));
@@ -166,6 +169,7 @@ export const insertPairSchema = createInsertSchema(pairs).omit({
 export const insertVoteSchema = createInsertSchema(votes).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
 });
 
 export const insertAllowedDomainSchema = createInsertSchema(allowedDomains).omit({

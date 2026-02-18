@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -32,14 +33,20 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
+  ChevronDown,
   ExternalLink,
   ThumbsUp,
   ThumbsDown,
   HelpCircle,
   AlertTriangle,
   Minus,
+  Download,
 } from "lucide-react";
 import type { Campaign, Pair, Vote, User } from "@shared/schema";
+
+type SortField = "sourceText" | "targetText" | "voteCount" | "positiveRate" | null;
+type SortDirection = "asc" | "desc";
 
 type PairResult = {
   pair: Pair;
@@ -93,6 +100,53 @@ function ConsensusIndicator({ rate }: { rate: number | null }) {
       <AlertTriangle className="w-3 h-3" />
       Disagreement
     </Badge>
+  );
+}
+
+function SortIcon({
+  field,
+  sortField,
+  sortDirection,
+}: {
+  field: SortField;
+  sortField: SortField;
+  sortDirection: SortDirection;
+}) {
+  if (sortField !== field) {
+    return <ChevronDown className="w-3 h-3 opacity-30" />;
+  }
+  return sortDirection === "asc" ? (
+    <ChevronUp className="w-3 h-3 opacity-80" />
+  ) : (
+    <ChevronDown className="w-3 h-3 opacity-80" />
+  );
+}
+
+function SortableHead({
+  field,
+  sortField,
+  sortDirection,
+  onSort,
+  className,
+  children,
+}: {
+  field: SortField;
+  sortField: SortField;
+  sortDirection: SortDirection;
+  onSort: (field: SortField) => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <TableHead
+      className={`cursor-pointer select-none hover:text-foreground ${className ?? ""}`}
+      onClick={() => onSort(field)}
+    >
+      <span className="inline-flex items-center gap-1">
+        {children}
+        <SortIcon field={field} sortField={sortField} sortDirection={sortDirection} />
+      </span>
+    </TableHead>
   );
 }
 
@@ -257,8 +311,16 @@ export default function ResultsBrowserPage() {
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [consensus, setConsensus] = useState<string>("all");
+  const [minVotesInput, setMinVotesInput] = useState("");
+  const [maxVotesInput, setMaxVotesInput] = useState("");
+  const [minVotes, setMinVotes] = useState<number | undefined>(undefined);
+  const [maxVotes, setMaxVotes] = useState<number | undefined>(undefined);
   const [page, setPage] = useState(1);
   const [selectedPairId, setSelectedPairId] = useState<string | null>(null);
+  const [sortField, setSortField] = useState<SortField>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [exportFormat, setExportFormat] = useState<"csv" | "json">("csv");
+  const [isExporting, setIsExporting] = useState(false);
 
   const { data: campaign } = useQuery<Campaign>({
     queryKey: ["/api/campaigns", campaignId],
@@ -271,7 +333,7 @@ export default function ResultsBrowserPage() {
   });
 
   const { data: results, isLoading } = useQuery<ResultsResponse>({
-    queryKey: ["/api/campaigns", campaignId, "results", { page, search, consensus }],
+    queryKey: ["/api/campaigns", campaignId, "results", { page, search, consensus, minVotes, maxVotes }],
     queryFn: async () => {
       const params = new URLSearchParams({
         page: page.toString(),
@@ -279,6 +341,8 @@ export default function ResultsBrowserPage() {
       });
       if (search) params.set("search", search);
       if (consensus !== "all") params.set("consensus", consensus);
+      if (minVotes !== undefined) params.set("minVotes", minVotes.toString());
+      if (maxVotes !== undefined) params.set("maxVotes", maxVotes.toString());
 
       const res = await fetch(`/api/campaigns/${campaignId}/results?${params}`);
       if (!res.ok) throw new Error("Failed to fetch results");
@@ -287,9 +351,132 @@ export default function ResultsBrowserPage() {
     enabled: !!campaignId,
   });
 
+  const sortedPairs = useMemo(() => {
+    if (!results?.pairs) return [];
+    if (!sortField) return results.pairs;
+
+    return [...results.pairs].sort((a, b) => {
+      let aVal: string | number | null;
+      let bVal: string | number | null;
+
+      switch (sortField) {
+        case "sourceText":
+          aVal = a.pair.sourceText ?? "";
+          bVal = b.pair.sourceText ?? "";
+          break;
+        case "targetText":
+          aVal = a.pair.targetText ?? "";
+          bVal = b.pair.targetText ?? "";
+          break;
+        case "voteCount":
+          aVal = a.voteCount;
+          bVal = b.voteCount;
+          break;
+        case "positiveRate":
+          aVal = a.positiveRate ?? -1;
+          bVal = b.positiveRate ?? -1;
+          break;
+        default:
+          return 0;
+      }
+
+      if (typeof aVal === "string" && typeof bVal === "string") {
+        const cmp = aVal.localeCompare(bVal);
+        return sortDirection === "asc" ? cmp : -cmp;
+      }
+
+      const cmp = (aVal as number) - (bVal as number);
+      return sortDirection === "asc" ? cmp : -cmp;
+    });
+  }, [results?.pairs, sortField, sortDirection]);
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDirection("desc");
+    }
+  };
+
   const handleSearch = () => {
     setSearch(searchInput);
+    const parsedMin = minVotesInput !== "" ? parseInt(minVotesInput, 10) : undefined;
+    const parsedMax = maxVotesInput !== "" ? parseInt(maxVotesInput, 10) : undefined;
+    setMinVotes(isNaN(parsedMin as number) ? undefined : parsedMin);
+    setMaxVotes(isNaN(parsedMax as number) ? undefined : parsedMax);
     setPage(1);
+  };
+
+  const handleExport = async () => {
+    if (!campaignId) return;
+    setIsExporting(true);
+    try {
+      if (exportFormat === "csv") {
+        const res = await fetch(`/api/campaigns/${campaignId}/export`);
+        if (!res.ok) throw new Error("Export failed");
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${campaign?.name?.replace(/\s+/g, "_") ?? "export"}_export.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const allPairs: PairResult[] = [];
+        let currentPage = 1;
+        let totalPages = 1;
+        do {
+          const params = new URLSearchParams({ page: currentPage.toString(), limit: "100" });
+          if (search) params.set("search", search);
+          if (consensus !== "all") params.set("consensus", consensus);
+          if (minVotes !== undefined) params.set("minVotes", minVotes.toString());
+          if (maxVotes !== undefined) params.set("maxVotes", maxVotes.toString());
+          const res = await fetch(`/api/campaigns/${campaignId}/results?${params}`);
+          if (!res.ok) throw new Error("Failed to fetch results for JSON export");
+          const data: ResultsResponse = await res.json();
+          allPairs.push(...data.pairs);
+          totalPages = data.totalPages;
+          currentPage++;
+        } while (currentPage <= totalPages);
+
+        const jsonContent = JSON.stringify(
+          {
+            campaign: campaign?.name ?? campaignId,
+            exportedAt: new Date().toISOString(),
+            total: allPairs.length,
+            pairs: allPairs.map((row) => ({
+              pair_id: row.pair.id,
+              source_text: row.pair.sourceText,
+              source_dataset: row.pair.sourceDataset,
+              source_id: row.pair.sourceId,
+              target_text: row.pair.targetText,
+              target_dataset: row.pair.targetDataset,
+              target_id: row.pair.targetId,
+              llm_confidence: row.pair.llmConfidence,
+              llm_model: row.pair.llmModel,
+              vote_count: row.voteCount,
+              positive_votes: row.positiveVotes,
+              negative_votes: row.negativeVotes,
+              positive_rate: row.positiveRate,
+            })),
+          },
+          null,
+          2
+        );
+        const blob = new Blob([jsonContent], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${campaign?.name?.replace(/\s+/g, "_") ?? "export"}_export.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      console.error("Export error:", err);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
@@ -345,6 +532,38 @@ export default function ResultsBrowserPage() {
                   <SelectItem value="unreviewed">Unreviewed</SelectItem>
                 </SelectContent>
               </Select>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="min-votes" className="text-sm text-muted-foreground whitespace-nowrap">
+                  Min votes
+                </Label>
+                <Input
+                  id="min-votes"
+                  type="number"
+                  min={0}
+                  placeholder="0"
+                  value={minVotesInput}
+                  onChange={(e) => setMinVotesInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                  className="w-20"
+                  data-testid="input-min-votes"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="max-votes" className="text-sm text-muted-foreground whitespace-nowrap">
+                  Max votes
+                </Label>
+                <Input
+                  id="max-votes"
+                  type="number"
+                  min={0}
+                  placeholder="any"
+                  value={maxVotesInput}
+                  onChange={(e) => setMaxVotesInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                  className="w-20"
+                  data-testid="input-max-votes"
+                />
+              </div>
               <Button onClick={handleSearch} data-testid="button-search">
                 Search
               </Button>
@@ -365,16 +584,48 @@ export default function ResultsBrowserPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[40%]">Source</TableHead>
-                      <TableHead className="w-[30%]">Target</TableHead>
-                      <TableHead className="text-center">Votes</TableHead>
+                      <SortableHead
+                        field="sourceText"
+                        sortField={sortField}
+                        sortDirection={sortDirection}
+                        onSort={handleSort}
+                        className="w-[40%]"
+                      >
+                        Source
+                      </SortableHead>
+                      <SortableHead
+                        field="targetText"
+                        sortField={sortField}
+                        sortDirection={sortDirection}
+                        onSort={handleSort}
+                        className="w-[30%]"
+                      >
+                        Target
+                      </SortableHead>
+                      <SortableHead
+                        field="voteCount"
+                        sortField={sortField}
+                        sortDirection={sortDirection}
+                        onSort={handleSort}
+                        className="text-center"
+                      >
+                        Votes
+                      </SortableHead>
                       <TableHead className="text-center">Skips</TableHead>
                       <TableHead>Consensus</TableHead>
-                      <TableHead className="text-right">Agreement</TableHead>
+                      <SortableHead
+                        field="positiveRate"
+                        sortField={sortField}
+                        sortDirection={sortDirection}
+                        onSort={handleSort}
+                        className="text-right"
+                      >
+                        Agreement
+                      </SortableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {results.pairs.map((row) => (
+                    {sortedPairs.map((row) => (
                       <TableRow
                         key={row.pair.id}
                         className="cursor-pointer hover-elevate"
@@ -455,6 +706,30 @@ export default function ResultsBrowserPage() {
             )}
           </CardContent>
         </Card>
+
+        <div className="flex items-center justify-end gap-2">
+          <Select
+            value={exportFormat}
+            onValueChange={(v) => setExportFormat(v as "csv" | "json")}
+          >
+            <SelectTrigger className="w-28" data-testid="select-export-format">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="csv">CSV</SelectItem>
+              <SelectItem value="json">JSON</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            variant="outline"
+            onClick={handleExport}
+            disabled={isExporting}
+            data-testid="button-export"
+          >
+            <Download className="w-4 h-4 mr-2" />
+            {isExporting ? "Exporting..." : `Export ${exportFormat.toUpperCase()}`}
+          </Button>
+        </div>
       </div>
 
       <PairDetailDialog

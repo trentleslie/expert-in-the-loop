@@ -55,6 +55,7 @@ const createCampaignSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
   description: z.string().max(500).optional(),
   campaignType: z.string().min(1, "Campaign type is required").max(50, "Campaign type must be 50 characters or less"),
+  instructions: z.string().max(2000).optional(),
 });
 
 type CreateCampaignForm = z.infer<typeof createCampaignSchema>;
@@ -130,6 +131,7 @@ function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
       name: "",
       description: "",
       campaignType: "",
+      instructions: "",
     },
   });
 
@@ -217,6 +219,28 @@ function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
                     />
                   </FormControl>
                   <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="instructions"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Reviewer Instructions (Optional)</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      placeholder="Provide guidance for reviewers on how to evaluate pairs in this campaign..."
+                      className="resize-none"
+                      rows={4}
+                      {...field}
+                      data-testid="input-campaign-instructions"
+                    />
+                  </FormControl>
+                  <FormMessage />
+                  <p className="text-xs text-muted-foreground">
+                    These instructions will be shown to reviewers in a collapsible panel on the review page.
+                  </p>
                 </FormItem>
               )}
             />
@@ -454,7 +478,18 @@ function CampaignCard({ campaign, onUpdate }: { campaign: CampaignWithStats; onU
         </div>
 
         <div className="flex items-center gap-2 pt-2 flex-wrap">
-          <UploadPairsDialog campaignId={campaign.id} onSuccess={onUpdate} />
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            asChild
+            data-testid={`button-upload-pairs-${campaign.id}`}
+          >
+            <Link href={`/admin/campaigns/${campaign.id}/upload`}>
+              <Upload className="w-4 h-4" />
+              Upload Pairs
+            </Link>
+          </Button>
           {campaign.totalPairs > 0 && (
             <>
               <Button 

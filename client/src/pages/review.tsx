@@ -15,6 +15,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { Switch } from "@/components/ui/switch";
@@ -28,9 +34,12 @@ import {
   Zap,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Loader2,
   ExternalLink,
   HelpCircle,
+  FileText,
+  Bot,
 } from "lucide-react";
 import type { Campaign, Pair } from "@shared/schema";
 
@@ -295,6 +304,21 @@ export default function ReviewPage() {
   const [reviewerNotes, setReviewerNotes] = useState("");
   const [isNumericMode, setIsNumericMode] = useState(false);
 
+  // Accordion panel state with localStorage persistence
+  const [expandedPanels, setExpandedPanels] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("review-expanded-panels");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Persist expanded panels to localStorage
+  useEffect(() => {
+    localStorage.setItem("review-expanded-panels", JSON.stringify(expandedPanels));
+  }, [expandedPanels]);
+
   const { data: campaign } = useQuery<Campaign>({
     queryKey: [`/api/campaigns/${campaignId}`, "detail", campaignId],
     enabled: !!campaignId,
@@ -552,6 +576,89 @@ export default function ReviewPage() {
                 metadata={pairData.pair.targetMetadata as Record<string, unknown> | null}
               />
             </div>
+
+            {/* Collapsible context panels */}
+            <Accordion
+              type="multiple"
+              value={expandedPanels}
+              onValueChange={setExpandedPanels}
+              className="space-y-2"
+            >
+              {/* Campaign Instructions Panel */}
+              {campaign?.instructions && (
+                <AccordionItem value="instructions" className="border rounded-lg px-4">
+                  <AccordionTrigger className="hover:no-underline py-3">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <FileText className="w-4 h-4 text-muted-foreground" />
+                      <span>Campaign Instructions</span>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent className="pb-4">
+                    <div className="text-sm text-muted-foreground whitespace-pre-wrap bg-muted/50 rounded-md p-3">
+                      {campaign.instructions}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              )}
+
+              {/* LLM Reasoning Panel */}
+              {(pairData.pair.llmReasoning || pairData.pair.llmConfidence !== null) && (
+                <AccordionItem value="llm-reasoning" className="border rounded-lg px-4">
+                  <AccordionTrigger className="hover:no-underline py-3">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <Bot className="w-4 h-4 text-muted-foreground" />
+                      <span>LLM Reasoning</span>
+                      {!expandedPanels.includes("llm-reasoning") && (
+                        <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 font-normal ml-2">
+                          <AlertTriangle className="w-3 h-3" />
+                          Form your own judgment before expanding
+                        </span>
+                      )}
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent className="pb-4 space-y-3">
+                    <div className="flex items-start gap-2 p-2 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                      <p className="text-xs text-amber-700 dark:text-amber-300">
+                        <strong>Bias Warning:</strong> LLM reasoning may anchor your judgment.
+                        Consider forming your initial opinion before reviewing this section.
+                      </p>
+                    </div>
+
+                    {pairData.pair.llmConfidence !== null && (
+                      <div className="flex items-center gap-3 text-sm">
+                        <span className="text-muted-foreground">Confidence:</span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className={`h-full transition-all ${
+                                pairData.pair.llmConfidence >= 0.8 ? "bg-green-500" :
+                                pairData.pair.llmConfidence >= 0.6 ? "bg-yellow-500" : "bg-red-500"
+                              }`}
+                              style={{ width: `${pairData.pair.llmConfidence * 100}%` }}
+                            />
+                          </div>
+                          <span className="font-mono text-xs">
+                            {(pairData.pair.llmConfidence * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                        {pairData.pair.llmModel && (
+                          <span className="text-xs text-muted-foreground">
+                            ({pairData.pair.llmModel})
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {pairData.pair.llmReasoning && (
+                      <div className="text-sm text-muted-foreground whitespace-pre-wrap bg-muted/50 rounded-md p-3">
+                        {pairData.pair.llmReasoning}
+                      </div>
+                    )}
+                  </AccordionContent>
+                </AccordionItem>
+              )}
+            </Accordion>
 
             {/* Confidence indicator */}
             <ConfidenceIndicator

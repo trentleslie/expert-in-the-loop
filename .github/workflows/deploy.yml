@@ -26,8 +26,9 @@ jobs:
           cd ~/expert-in-the-loop
           git pull origin main
           npm ci
+          npm run db:push
           npm run build
           sudo systemctl restart expert-in-the-loop
           sleep 5
-          curl -s -o /dev/null -w "%{http_code}" http://localhost:5000 | grep -q "200" && echo "✅ App healthy" || echo "❌ App failed to start"
+          curl -s -o /dev/null -w "%{http_code}" http://localhost:5000 | grep -q "200" && echo "App healthy" || echo "App failed to start"
           DEPLOY_SCRIPT

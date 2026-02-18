@@ -21,6 +21,7 @@ import AdminDomains from "@/pages/admin/domains";
 import AdminUsers from "@/pages/admin/users";
 import AdminSettings from "@/pages/admin/settings";
 import AdminAnalytics from "@/pages/admin/analytics";
+import AdminUpload from "@/pages/admin/upload";
 import NotFound from "@/pages/not-found";
 
 function LoadingScreen() {
@@ -124,6 +125,12 @@ function Router() {
       <Route path="/admin/campaigns/:id/results">
         <ProtectedRoute requireAdmin>
           <AdminResults />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/admin/campaigns/:id/upload">
+        <ProtectedRoute requireAdmin>
+          <AdminUpload />
         </ProtectedRoute>
       </Route>
 
