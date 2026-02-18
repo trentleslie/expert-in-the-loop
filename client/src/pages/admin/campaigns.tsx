@@ -454,7 +454,18 @@ function CampaignCard({ campaign, onUpdate }: { campaign: CampaignWithStats; onU
         </div>
 
         <div className="flex items-center gap-2 pt-2 flex-wrap">
-          <UploadPairsDialog campaignId={campaign.id} onSuccess={onUpdate} />
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            asChild
+            data-testid={`button-upload-pairs-${campaign.id}`}
+          >
+            <Link href={`/admin/campaigns/${campaign.id}/upload`}>
+              <Upload className="w-4 h-4" />
+              Upload Pairs
+            </Link>
+          </Button>
           {campaign.totalPairs > 0 && (
             <>
               <Button 

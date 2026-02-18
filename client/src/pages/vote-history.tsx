@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -168,6 +168,16 @@ function EditVoteDialog({
     vote?.scoreNumeric ?? null
   );
   const [reviewerNotes, setReviewerNotes] = useState(vote?.reviewerNotes || "");
+
+  // Sync state when the vote prop changes (e.g. user opens a different vote for editing)
+  useEffect(() => {
+    if (vote) {
+      setScoringMode(vote.scoringMode || "binary");
+      setScoreBinary(vote.scoreBinary ?? null);
+      setScoreNumeric(vote.scoreNumeric ?? null);
+      setReviewerNotes(vote.reviewerNotes || "");
+    }
+  }, [vote?.id]);
 
   const updateMutation = useMutation({
     mutationFn: async () => {
