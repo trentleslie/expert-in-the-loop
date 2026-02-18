@@ -146,89 +146,178 @@ export async function registerRoutes(
   });
 
   // Upload pairs to campaign (admin only)
+  // Accepts two formats:
+  //   1. multipart/form-data with a "file" field (CSV or JSON file upload)
+  //   2. application/json body with a "pairs" array (pre-mapped data from the column mapping wizard)
   app.post("/api/campaigns/:id/pairs", requireAdmin, upload.single("file"), async (req, res) => {
     try {
       const campaignId = req.params.id;
       const campaign = await storage.getCampaign(campaignId);
-      
+
       if (!campaign) {
         return res.status(404).json({ message: "Campaign not found" });
       }
 
-      if (!req.file) {
-        return res.status(400).json({ message: "No file uploaded" });
-      }
-
-      const fileContent = req.file.buffer.toString("utf-8");
       let pairsData: InsertPair[] = [];
 
-      if (req.file.mimetype === "application/json" || req.file.originalname.endsWith(".json")) {
-        // Parse JSON
-        const parsed = JSON.parse(fileContent);
-        const rawPairs = parsed.pairs || parsed;
-        
-        pairsData = rawPairs.map((p: any) => ({
-          campaignId,
-          pairType: p.pair_type || p.pairType || campaign.campaignType,
-          sourceText: p.source_text || p.sourceText,
-          sourceDataset: p.source_dataset || p.sourceDataset,
-          sourceId: p.source_id || p.sourceId,
-          sourceMetadata: p.source_metadata || p.sourceMetadata || null,
-          targetText: p.target_text || p.targetText,
-          targetDataset: p.target_dataset || p.targetDataset,
-          targetId: p.target_id || p.targetId,
-          targetMetadata: p.target_metadata || p.targetMetadata || null,
-          llmConfidence: p.llm_confidence !== undefined ? parseFloat(p.llm_confidence) : (p.llmConfidence !== undefined ? p.llmConfidence : null),
-          llmModel: p.llm_model || p.llmModel || null,
-          llmReasoning: p.llm_reasoning || p.llmReasoning || null,
-        }));
-      } else {
-        // Parse CSV
-        const records = parse(fileContent, {
-          columns: true,
-          skip_empty_lines: true,
-          trim: true,
-        });
+      if (req.is("application/json")) {
+        // ── JSON body path (pre-mapped pairs from column mapping wizard) ──────
+        const { pairs: rawPairs } = req.body;
 
-        pairsData = records.map((row: any) => {
-          // Build metadata from extra columns
-          const sourceMetadata: Record<string, unknown> = {};
-          const targetMetadata: Record<string, unknown> = {};
-          
-          if (row.category) sourceMetadata.category = row.category;
-          if (row.units) sourceMetadata.units = row.units;
-          if (row.data_type) sourceMetadata.data_type = row.data_type;
-          if (row.query_source) sourceMetadata.query_source = row.query_source;
-          if (row.num_queries) sourceMetadata.num_queries = row.num_queries;
-          if (row.top_5_loinc) targetMetadata.top_5_loinc = row.top_5_loinc;
+        if (!Array.isArray(rawPairs) || rawPairs.length === 0) {
+          return res.status(400).json({ message: "Request body must contain a non-empty 'pairs' array" });
+        }
+
+        // Validate each pair has the required fields
+        const validPairTypes = ["questionnaire_match", "loinc_mapping"];
+        const invalidPairs: number[] = [];
+
+        pairsData = rawPairs.map((p: any, idx: number) => {
+          const pairType = p.pair_type || p.pairType || campaign.campaignType;
+          const sourceText = p.source_text || p.sourceText;
+          const sourceDataset = p.source_dataset || p.sourceDataset;
+          const sourceId = p.source_id || p.sourceId;
+          const targetText = p.target_text || p.targetText;
+          const targetDataset = p.target_dataset || p.targetDataset;
+          const targetId = p.target_id || p.targetId;
+
+          if (!sourceText || !sourceId || !targetText || !targetId || !validPairTypes.includes(pairType)) {
+            invalidPairs.push(idx);
+          }
 
           return {
             campaignId,
-            pairType: row.pair_type || campaign.campaignType,
-            // Support both standard names and Arivale/LOINC format
-            sourceText: row.source_text || row.description,
-            sourceDataset: row.source_dataset || row.cohort || "Unknown",
-            sourceId: row.source_id || row.field_name,
-            sourceMetadata: row.source_metadata 
-              ? JSON.parse(row.source_metadata) 
-              : (Object.keys(sourceMetadata).length > 0 ? sourceMetadata : null),
-            targetText: row.target_text || row.loinc_name,
-            targetDataset: row.target_dataset || (row.loinc_code ? "LOINC" : "Unknown"),
-            targetId: row.target_id || row.loinc_code,
-            targetMetadata: row.target_metadata 
-              ? JSON.parse(row.target_metadata) 
-              : (Object.keys(targetMetadata).length > 0 ? targetMetadata : null),
-            llmConfidence: row.llm_confidence 
-              ? parseFloat(row.llm_confidence) 
-              : (row.confidence_score ? parseFloat(row.confidence_score) : null),
-            llmModel: row.llm_model || null,
-            llmReasoning: row.llm_reasoning || null,
+            pairType: pairType as "questionnaire_match" | "loinc_mapping",
+            sourceText: sourceText || "",
+            sourceDataset: sourceDataset || "Unknown",
+            sourceId: sourceId || "",
+            sourceMetadata: p.source_metadata || p.sourceMetadata || null,
+            targetText: targetText || "",
+            targetDataset: targetDataset || "Unknown",
+            targetId: targetId || "",
+            targetMetadata: p.target_metadata || p.targetMetadata || null,
+            llmConfidence: p.llm_confidence !== undefined
+              ? parseFloat(p.llm_confidence)
+              : (p.llmConfidence !== undefined ? parseFloat(p.llmConfidence) : null),
+            llmModel: p.llm_model || p.llmModel || null,
+            llmReasoning: p.llm_reasoning || p.llmReasoning || null,
           };
+        });
+
+        if (invalidPairs.length > 0) {
+          return res.status(400).json({
+            message: `${invalidPairs.length} pair(s) are missing required fields (sourceText, sourceId, targetText, targetId) or have an invalid pairType. Valid types: ${validPairTypes.join(", ")}`,
+            invalidIndices: invalidPairs,
+          });
+        }
+      } else {
+        // ── File upload path (existing behavior) ────────────────────────────
+        if (!req.file) {
+          return res.status(400).json({ message: "No file uploaded" });
+        }
+
+        const fileContent = req.file.buffer.toString("utf-8");
+
+        if (req.file.mimetype === "application/json" || req.file.originalname.endsWith(".json")) {
+          // Parse JSON file
+          const parsed = JSON.parse(fileContent);
+          const rawPairs = parsed.pairs || parsed;
+
+          pairsData = rawPairs.map((p: any) => ({
+            campaignId,
+            pairType: p.pair_type || p.pairType || campaign.campaignType,
+            sourceText: p.source_text || p.sourceText,
+            sourceDataset: p.source_dataset || p.sourceDataset,
+            sourceId: p.source_id || p.sourceId,
+            sourceMetadata: p.source_metadata || p.sourceMetadata || null,
+            targetText: p.target_text || p.targetText,
+            targetDataset: p.target_dataset || p.targetDataset,
+            targetId: p.target_id || p.targetId,
+            targetMetadata: p.target_metadata || p.targetMetadata || null,
+            llmConfidence: p.llm_confidence !== undefined ? parseFloat(p.llm_confidence) : (p.llmConfidence !== undefined ? p.llmConfidence : null),
+            llmModel: p.llm_model || p.llmModel || null,
+            llmReasoning: p.llm_reasoning || p.llmReasoning || null,
+          }));
+        } else {
+          // Parse CSV file
+          const records = parse(fileContent, {
+            columns: true,
+            skip_empty_lines: true,
+            trim: true,
+          });
+
+          pairsData = records.map((row: any) => {
+            // Build metadata from extra columns
+            const sourceMetadata: Record<string, unknown> = {};
+            const targetMetadata: Record<string, unknown> = {};
+
+            if (row.category) sourceMetadata.category = row.category;
+            if (row.units) sourceMetadata.units = row.units;
+            if (row.data_type) sourceMetadata.data_type = row.data_type;
+            if (row.query_source) sourceMetadata.query_source = row.query_source;
+            if (row.num_queries) sourceMetadata.num_queries = row.num_queries;
+            if (row.top_5_loinc) targetMetadata.top_5_loinc = row.top_5_loinc;
+
+            return {
+              campaignId,
+              pairType: row.pair_type || campaign.campaignType,
+              // Support both standard names and Arivale/LOINC format
+              sourceText: row.source_text || row.description,
+              sourceDataset: row.source_dataset || row.cohort || "Unknown",
+              sourceId: row.source_id || row.field_name,
+              sourceMetadata: row.source_metadata
+                ? JSON.parse(row.source_metadata)
+                : (Object.keys(sourceMetadata).length > 0 ? sourceMetadata : null),
+              targetText: row.target_text || row.loinc_name,
+              targetDataset: row.target_dataset || (row.loinc_code ? "LOINC" : "Unknown"),
+              targetId: row.target_id || row.loinc_code,
+              targetMetadata: row.target_metadata
+                ? JSON.parse(row.target_metadata)
+                : (Object.keys(targetMetadata).length > 0 ? targetMetadata : null),
+              llmConfidence: row.llm_confidence
+                ? parseFloat(row.llm_confidence)
+                : (row.confidence_score ? parseFloat(row.confidence_score) : null),
+              llmModel: row.llm_model || null,
+              llmReasoning: row.llm_reasoning || null,
+            };
+          });
+        }
+      }
+
+      // ── Duplicate detection ───────────────────────────────────────────────
+      // Fetch all existing source_id + target_id combinations for this campaign
+      const existingPairsRaw = await storage.getPairIdentifiers(campaignId);
+      const existingSet = new Set(
+        existingPairsRaw.map((p) => `${p.sourceId}::${p.targetId}`)
+      );
+
+      const duplicates: string[] = [];
+      const uniquePairsData = pairsData.filter((p) => {
+        const key = `${p.sourceId}::${p.targetId}`;
+        if (existingSet.has(key)) {
+          duplicates.push(key);
+          return false;
+        }
+        return true;
+      });
+
+      if (uniquePairsData.length === 0) {
+        return res.status(409).json({
+          message: `All ${pairsData.length} pair(s) already exist in this campaign. No new pairs were imported.`,
+          duplicateCount: duplicates.length,
+          importedCount: 0,
         });
       }
 
-      const count = await storage.createPairs(pairsData);
-      res.json({ count, message: `Successfully imported ${count} pairs` });
+      const count = await storage.createPairs(uniquePairsData);
+
+      res.json({
+        count,
+        message: `Successfully imported ${count} pair(s)${duplicates.length > 0 ? `. Skipped ${duplicates.length} duplicate(s).` : "."}`,
+        importedCount: count,
+        duplicateCount: duplicates.length,
+        skippedDuplicates: duplicates.length > 0 ? duplicates : undefined,
+      });
     } catch (error) {
       console.error("Error uploading pairs:", error);
       res.status(500).json({ message: "Failed to upload pairs" });
@@ -579,6 +668,20 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error creating template:", error);
       res.status(500).json({ message: "Failed to create template" });
+    }
+  });
+
+  // Get single import template by id
+  app.get("/api/import-templates/:id", requireAdmin, async (req, res) => {
+    try {
+      const template = await storage.getImportTemplate(req.params.id);
+      if (!template) {
+        return res.status(404).json({ message: "Template not found" });
+      }
+      res.json(template);
+    } catch (error) {
+      console.error("Error fetching template:", error);
+      res.status(500).json({ message: "Failed to fetch template" });
     }
   });
 

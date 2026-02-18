@@ -91,6 +91,7 @@ export const votes = pgTable("votes", {
   // Reviewer notes/reasoning for their decision
   reviewerNotes: text("reviewer_notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").$onUpdate(() => new Date()),
 }, (table) => ({
   uniqueUserPair: unique().on(table.pairId, table.userId),
 }));
@@ -166,6 +167,7 @@ export const insertPairSchema = createInsertSchema(pairs).omit({
 export const insertVoteSchema = createInsertSchema(votes).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
 });
 
 export const insertAllowedDomainSchema = createInsertSchema(allowedDomains).omit({
