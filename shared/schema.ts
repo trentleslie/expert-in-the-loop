@@ -31,6 +31,8 @@ export const campaigns = pgTable("campaigns", {
   name: text("name").notNull(),
   description: text("description"),
   campaignType: text("campaign_type").notNull(),
+  // Reviewer instructions shown on the review page
+  instructions: text("instructions"),
   createdBy: varchar("created_by", { length: 255 }).references(() => users.id).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   status: campaignStatusEnum("status").notNull().default("draft"),
