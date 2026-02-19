@@ -434,6 +434,12 @@ export default function ReviewPage() {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Guard: don't fire shortcuts when typing in inputs
+      const activeTag = (document.activeElement as HTMLElement)?.tagName;
+      if (activeTag === "TEXTAREA" || activeTag === "INPUT") {
+        return;
+      }
+
       if (voteMutation.isPending || skipMutation.isPending || !pairData?.pair) return;
       
       if (isNumericMode) {
