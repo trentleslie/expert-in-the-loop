@@ -21,6 +21,16 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { Switch } from "@/components/ui/switch";
@@ -319,6 +329,17 @@ export default function ReviewPage() {
     localStorage.setItem("review-expanded-panels", JSON.stringify(expandedPanels));
   }, [expandedPanels]);
 
+  // Pending vote state for confirmation dialog
+  const [pendingVote, setPendingVote] = useState<{
+    type: 'binary';
+    value: "match" | "no_match" | "unsure";
+  } | {
+    type: 'numeric';
+    value: number;
+  } | null>(null);
+
+  const [pendingSkip, setPendingSkip] = useState(false);
+
   const { data: campaign } = useQuery<Campaign>({
     queryKey: [`/api/campaigns/${campaignId}`, "detail", campaignId],
     enabled: !!campaignId,
@@ -335,9 +356,9 @@ export default function ReviewPage() {
   });
 
   const voteMutation = useMutation({
-    mutationFn: async ({ pairId, scoreBinary, scoreNumeric, expertCode, notes, scoringMode }: { 
-      pairId: string; 
-      scoreBinary: boolean | null;
+    mutationFn: async ({ pairId, scoreBinary, scoreNumeric, expertCode, notes, scoringMode }: {
+      pairId: string;
+      scoreBinary: "match" | "no_match" | "unsure" | null;
       scoreNumeric: number | null;
       expertCode: string | null;
       notes: string;
@@ -401,39 +422,77 @@ export default function ReviewPage() {
 
   const handleBinaryVote = useCallback((score: "match" | "no_match" | "unsure") => {
     if (pairData?.pair) {
-      voteMutation.mutate({ 
-        pairId: pairData.pair.id, 
-        scoreBinary: score,
+      setPendingVote({ type: 'binary', value: score });
+    }
+  }, [pairData?.pair]);
+
+  const handleNumericVote = useCallback((score: number) => {
+    if (pairData?.pair) {
+      setPendingVote({ type: 'numeric', value: score });
+    }
+  }, [pairData?.pair]);
+
+  const handleSkip = useCallback(() => {
+    if (pairData?.pair) {
+      setPendingSkip(true);
+    }
+  }, [pairData?.pair]);
+
+  // Confirmation handlers that execute the actual mutations
+  const confirmVote = useCallback(() => {
+    if (!pendingVote || !pairData?.pair) return;
+
+    if (pendingVote.type === 'binary') {
+      voteMutation.mutate({
+        pairId: pairData.pair.id,
+        scoreBinary: pendingVote.value,
         scoreNumeric: null,
         scoringMode: "binary",
         expertCode: expertSelectedCode,
         notes: reviewerNotes,
       });
-    }
-  }, [pairData?.pair, voteMutation, expertSelectedCode, reviewerNotes]);
-
-  const handleNumericVote = useCallback((score: number) => {
-    if (pairData?.pair) {
-      voteMutation.mutate({ 
-        pairId: pairData.pair.id, 
+    } else {
+      voteMutation.mutate({
+        pairId: pairData.pair.id,
         scoreBinary: null,
-        scoreNumeric: score,
+        scoreNumeric: pendingVote.value,
         scoringMode: "numeric",
         expertCode: expertSelectedCode,
         notes: reviewerNotes,
       });
     }
-  }, [pairData?.pair, voteMutation, expertSelectedCode, reviewerNotes]);
+    setPendingVote(null);
+  }, [pendingVote, pairData?.pair, voteMutation, expertSelectedCode, reviewerNotes]);
 
-  const handleSkip = useCallback(() => {
-    if (pairData?.pair) {
-      skipMutation.mutate(pairData.pair.id);
-    }
+  const confirmSkip = useCallback(() => {
+    if (!pairData?.pair) return;
+    skipMutation.mutate(pairData.pair.id);
+    setPendingSkip(false);
   }, [pairData?.pair, skipMutation]);
+
+  const cancelPendingAction = useCallback(() => {
+    setPendingVote(null);
+    setPendingSkip(false);
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Handle dialog keyboard shortcuts first
+      if (pendingVote || pendingSkip) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          pendingVote ? confirmVote() : confirmSkip();
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          cancelPendingAction();
+          return;
+        }
+        return; // Block all other shortcuts while dialog is open
+      }
+
       // Guard: don't fire shortcuts when typing in inputs
       const activeTag = (document.activeElement as HTMLElement)?.tagName;
       if (activeTag === "TEXTAREA" || activeTag === "INPUT") {
@@ -441,7 +500,7 @@ export default function ReviewPage() {
       }
 
       if (voteMutation.isPending || skipMutation.isPending || !pairData?.pair) return;
-      
+
       if (isNumericMode) {
         // Numeric mode: 1-5 keys for scoring
         const numKey = parseInt(e.key);
@@ -466,7 +525,7 @@ export default function ReviewPage() {
           return;
         }
       }
-      
+
       // Skip works in both modes
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -476,7 +535,7 @@ export default function ReviewPage() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleBinaryVote, handleNumericVote, handleSkip, voteMutation.isPending, skipMutation.isPending, pairData?.pair, isNumericMode]);
+  }, [handleBinaryVote, handleNumericVote, handleSkip, voteMutation.isPending, skipMutation.isPending, pairData?.pair, isNumericMode, pendingVote, pendingSkip, confirmVote, confirmSkip, cancelPendingAction]);
 
   const progress = pairData?.progress 
     ? Math.round((pairData.progress.reviewed / Math.max(pairData.progress.total, 1)) * 100)
@@ -689,7 +748,7 @@ export default function ReviewPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">None (use AI suggestion)</SelectItem>
-                      {parseTop5Loinc(pairData.pair.targetMetadata?.top_5_loinc).map((alt) => (
+                      {parseTop5Loinc((pairData.pair.targetMetadata as Record<string, unknown> | null)?.top_5_loinc).map((alt) => (
                         <SelectItem key={alt.code} value={alt.code}>
                           <span className="flex items-center gap-2">
                             <span className="font-mono">{alt.code}</span>
@@ -843,6 +902,60 @@ export default function ReviewPage() {
           </>
         )}
       </div>
+
+      {/* Vote Confirmation Dialog */}
+      <AlertDialog open={!!pendingVote} onOpenChange={() => setPendingVote(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Vote</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>You are about to submit:</p>
+                <p className="text-2xl font-semibold text-center py-2">
+                  {pendingVote?.type === 'binary' ? (
+                    pendingVote.value === 'match' ? '👍 Match' :
+                    pendingVote.value === 'no_match' ? '👎 No Match' : '🤷 Unsure'
+                  ) : (
+                    `${pendingVote?.value} - ${
+                      pendingVote?.value === 1 ? 'No Match' :
+                      pendingVote?.value === 2 ? 'Weak Match' :
+                      pendingVote?.value === 3 ? 'Moderate Match' :
+                      pendingVote?.value === 4 ? 'Strong Match' : 'Perfect Match'
+                    }`
+                  )}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  <strong>Notes:</strong> {reviewerNotes.trim() || 'No notes'}
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmVote} disabled={voteMutation.isPending}>
+              {voteMutation.isPending ? 'Submitting...' : 'Submit Vote'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Skip Confirmation Dialog */}
+      <AlertDialog open={pendingSkip} onOpenChange={() => setPendingSkip(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Skip This Pair?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This pair will be removed from your queue. You can find it later in your skipped pairs if needed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmSkip} disabled={skipMutation.isPending}>
+              {skipMutation.isPending ? 'Skipping...' : 'Skip Pair'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
