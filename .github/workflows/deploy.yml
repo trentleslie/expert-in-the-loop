@@ -26,7 +26,8 @@ jobs:
           cd ~/expert-in-the-loop
           git pull origin main
           npm ci
-          npm run db:push
+          # NOTE: db:push removed from CI - run manually when schema changes
+          # drizzle-kit push is interactive and hangs in non-TTY environments
           npm run build
           sudo systemctl restart expert-in-the-loop
           sleep 5
