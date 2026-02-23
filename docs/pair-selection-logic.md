@@ -8,38 +8,50 @@ The system uses a **collaborative review model** where all reviewers independent
 1. What they haven't yet reviewed or skipped
 2. A priority algorithm favoring pairs needing more human evaluation
 
-## Per-User Selection Algorithm
+## Selection Algorithm
 
-When a user requests the next pair (`GET /api/campaigns/:id/next-pair`), the system:
+When a user requests the next pair (`GET /api/campaigns/:id/next-pair`), the system combines **per-user exclusion** with **cross-user priority ranking**:
 
-### Step 1: Build Exclusion Set
-Queries the user's history to exclude:
+### Step 1: Build Exclusion Set (Per-User)
+Queries **only the current user's** history to exclude:
 - All pairs they've already voted on (`votes` table)
 - All pairs they've skipped (`skipped_pairs` table)
 
-### Step 2: Apply Priority Ranking
-Remaining pairs are ranked by priority:
+Other users' activity does not affect your exclusion set—you will eventually see all pairs.
+
+### Step 2: Apply Priority Ranking (Cross-User)
+Remaining pairs are ranked by priority using **aggregated vote data from ALL users**:
 
 | Priority | Criteria | Rationale |
 |----------|----------|-----------|
 | 0 (highest) | Unevaluated pairs (0 votes from anyone) | Ensure all pairs get reviewed |
-| 1 | Low-confidence pairs (LLM < 0.7) with < 3 votes | Human validation where AI is uncertain |
-| 2 | Disputed pairs (40-60% match rate) | Resolve disagreement with more opinions |
+| 1 | Low-confidence pairs (LLM < 0.7) with < 3 total votes | Human validation where AI is uncertain |
+| 2 | Disputed pairs (40-60% match rate across all voters) | Resolve disagreement with more opinions |
 | 3 | Everything else | Already have consensus |
+
+**Example**: If another reviewer votes on a previously-unreviewed pair, it moves from Priority 0 → Priority 1/2/3 for everyone, even users who haven't seen it yet.
 
 ### Step 3: Random Tiebreaker
 Within the same priority tier, pairs are selected randomly via `RANDOM()`.
 
 ## Cross-User Behavior
 
-**There is no cross-user coordination.**
+**No assignment coordination, but collaborative prioritization.**
 
+What's **NOT** shared across users:
+- No locks, reservations, or pair assignment mechanisms
 - Different users can vote on the same pair simultaneously
-- No locks, reservations, or assignment mechanisms
-- All users of a campaign eventually see all pairs (in different orders)
-- PostgreSQL unique constraint on `(pairId, userId)` ensures one vote per user per pair
+- Each user's exclusion set is independent
 
-This enables computing inter-rater reliability (Krippendorff's Alpha) from independent evaluations.
+What **IS** shared across users:
+- Vote counts and match rates are aggregated across all reviewers
+- Priority ranking reflects the collective state of all evaluations
+- As the team reviews pairs, priority automatically shifts to uncertain/disputed items
+
+This design enables:
+- Computing inter-rater reliability (Krippendorff's Alpha) from independent evaluations
+- Dynamic focus on pairs where human judgment adds the most value
+- PostgreSQL unique constraint on `(pairId, userId)` ensures one vote per user per pair
 
 ## State Tracking
 
