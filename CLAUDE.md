@@ -49,12 +49,14 @@ Stack: Ubuntu 22.04, Node.js 20, Python 3.11, PostgreSQL 16, nginx reverse proxy
 | App | URL | Port | Service | Stack |
 |-----|-----|------|---------|-------|
 | Expert-in-the-Loop | https://expertintheloop.io | 5000 | `expert-in-the-loop` | Node.js/Express |
+| Expert-in-the-Loop (Dev) | https://dev.expertintheloop.io | 5001 | `expert-in-the-loop-dev` | Node.js/Express |
 | PGS Catalog Explorer | https://pgsc.expertintheloop.io | 8501 | `pgs-catalog-explorer` | Python/Streamlit |
 | KRAKEN Chatbot | https://kraken.expertintheloop.io | 8000 | `kraken-backend` | React + Python/FastAPI |
 
 ```
 /home/ubuntu/
-├── expert-in-the-loop/      # This repo (Node.js, port 5000)
+├── expert-in-the-loop/      # Production (main branch, port 5000)
+├── expert-in-the-loop-dev/  # Dev (dev branch, port 5001)
 ├── pgs-catalog-explorer/    # Streamlit app (Python, port 8501)
 └── kraken-chatbot/          # KRAKEN KG chat (React + FastAPI, port 8000)
 ```
@@ -65,7 +67,7 @@ Stack: Ubuntu 22.04, Node.js 20, Python 3.11, PostgreSQL 16, nginx reverse proxy
 - **Instance**: `expert-in-the-loop-upgraded` (bundle: `large_3_0`, 8GB RAM, blueprint: `ubuntu_22_04`)
 - **Static IP**: `expert-in-the-loop-ip` → `35.161.242.62`
 - **Domain**: `expertintheloop.io` (DNS A records on Squarespace pointing to static IP)
-- **Subdomains**: `pgsc.expertintheloop.io` (PGS Catalog), `kraken.expertintheloop.io` (KRAKEN Chatbot) → same static IP
+- **Subdomains**: `dev.expertintheloop.io` (Dev instance), `pgsc.expertintheloop.io` (PGS Catalog), `kraken.expertintheloop.io` (KRAKEN Chatbot) → same static IP
 - **Open ports**: 22 (SSH), 80 (HTTP → redirects to HTTPS), 443 (HTTPS), 5000 (direct app access)
 - **SSL**: Let's Encrypt via certbot with nginx plugin, auto-renews via systemd timer
 
@@ -83,10 +85,13 @@ aws lightsail get-instance-metric-data --instance-name expert-in-the-loop-upgrad
 
 - **PostgreSQL 16** (from PGDG apt repo, not Ubuntu default PG 14)
 - **Cluster**: 16/main on port 5432
-- **User**: `expertuser`, **Database**: `expertloop`
+- **User**: `expertuser`
+- **Production database**: `expertloop`
+- **Dev database**: `expertloop_dev`
 - **Auth**: md5 (configured in `/etc/postgresql/16/main/pg_hba.conf`)
 - **Backup**: `pg_dump -U expertuser -h localhost -Fc expertloop > backup.dump`
 - **Restore**: `pg_restore -U expertuser -d expertloop -h localhost --no-owner --no-privileges backup.dump`
+- **Schema changes**: `npm run db:push` must be run manually via interactive SSH on each database when schema changes land. Run on `expertloop_dev` when pushing schema changes to `dev`, and on `expertloop` when merging to `main`. The `session` table must also be created manually on new databases (see Known Issues).
 
 ### Manual Deploy workflow (alternative)
 
@@ -105,18 +110,16 @@ sudo systemctl restart expert-in-the-loop
 
 ### Automated Deployment (GitHub Actions)
 
-Pushing to `main` triggers automatic deployment via GitHub Actions:
+| Branch | Workflow | Target | Port |
+|--------|----------|--------|------|
+| `main` | `.github/workflows/deploy.yml` | `~/expert-in-the-loop/` | 5000 |
+| `dev` | `.github/workflows/deploy-dev.yml` | `~/expert-in-the-loop-dev/` | 5001 |
 
-1. SSHs into Lightsail using deploy key
-2. Pulls latest code from `main`
-3. Runs `npm ci` and `npm run build`
-4. Restarts the systemd service
-5. Health check verifies app responds on port 5000
+Both workflows SSH into Lightsail, pull the branch, run `npm ci && npm run build`, restart the systemd service, and health-check.
 
-**Workflow file**: `.github/workflows/lightsail-deploy.yml`
 **Actions URL**: https://github.com/trentleslie/expert-in-the-loop/actions
 
-To trigger manually: Go to Actions → "Deploy to Lightsail" → "Run workflow"
+To trigger manually: Go to Actions → select the workflow → "Run workflow"
 
 **GitHub Secrets** (manage via `gh secret set`, not web UI):
 | Secret | Purpose |
@@ -128,10 +131,15 @@ To trigger manually: Go to Actions → "Deploy to Lightsail" → "Run workflow"
 ### Service management
 
 ```bash
-# Expert-in-the-Loop (Node.js)
+# Expert-in-the-Loop — Production (Node.js)
 sudo systemctl status expert-in-the-loop
 sudo systemctl restart expert-in-the-loop
 sudo journalctl -u expert-in-the-loop -f
+
+# Expert-in-the-Loop — Dev (Node.js)
+sudo systemctl status expert-in-the-loop-dev
+sudo systemctl restart expert-in-the-loop-dev
+sudo journalctl -u expert-in-the-loop-dev -f
 
 # PGS Catalog Explorer (Streamlit)
 sudo systemctl status pgs-catalog-explorer
@@ -185,8 +193,28 @@ claude login  # Opens browser for OAuth (may require SSH with X forwarding or se
 Production `.env` on Lightsail (`/home/ubuntu/expert-in-the-loop/.env`):
 `DATABASE_URL`, `NODE_ENV`, `PORT`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, `APP_URL`
 
-**Note**: `APP_URL` (e.g., `https://expertintheloop.io`) is used to construct the OAuth callback URL. Express has `trust proxy` enabled for nginx `X-Forwarded-Proto` headers. The systemd `EnvironmentFile` does not handle special characters like `!` in values — use only alphanumeric passwords.
+Dev `.env` on Lightsail (`/home/ubuntu/expert-in-the-loop-dev/.env`):
+Same keys as production plus `SESSION_COOKIE_NAME=connect.sid.dev`. Key differences: `DATABASE_URL` → `expertloop_dev`, `PORT` → `5001`, `APP_URL` → `https://dev.expertintheloop.io`, separate `SESSION_SECRET`.
+
+**Note**: `APP_URL` is used to construct the OAuth callback URL. Express has `trust proxy` enabled for nginx `X-Forwarded-Proto` headers. The systemd `EnvironmentFile` does not handle special characters like `!` in values — use only alphanumeric passwords. `SESSION_COOKIE_NAME` prevents cookie collision between prod and dev instances on sibling subdomains.
 
 ### OAuth
 
-Google Cloud Console must have `https://expertintheloop.io/api/auth/google/callback` as an authorized redirect URI. The `APP_URL` env var controls callback URL generation in `server/auth.ts`.
+Google Cloud Console must have both redirect URIs registered:
+- `https://expertintheloop.io/api/auth/google/callback` (production)
+- `https://dev.expertintheloop.io/api/auth/google/callback` (dev)
+
+The `APP_URL` env var controls callback URL generation in `server/auth.ts`.
+
+### Known Issues
+
+- **`connect-pg-simple` session table auto-creation fails in production builds**: The `createTableIfMissing: true` option can't find `table.sql` when the server is bundled by esbuild (the file path resolves relative to `dist/` instead of `node_modules/`). The session table must be created manually on new databases:
+  ```sql
+  CREATE TABLE IF NOT EXISTS "session" (
+    "sid" varchar NOT NULL COLLATE "default",
+    "sess" json NOT NULL,
+    "expire" timestamp(6) NOT NULL,
+    CONSTRAINT "session_pkey" PRIMARY KEY ("sid")
+  );
+  CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire");
+  ```
