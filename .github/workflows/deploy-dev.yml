@@ -1,0 +1,37 @@
+name: Deploy to Lightsail (Dev)
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" | base64 -d > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+        env:
+          SSH_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+
+      - name: Deploy to Lightsail (Dev)
+        env:
+          SSH_USER: ${{ secrets.LIGHTSAIL_USER }}
+          SSH_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key "$SSH_USER@$SSH_HOST" << 'DEPLOY_SCRIPT'
+          set -e
+          cd ~/expert-in-the-loop-dev
+          git pull origin dev
+          npm ci
+          # NOTE: db:push removed from CI - run manually when schema changes
+          # drizzle-kit push is interactive and hangs in non-TTY environments
+          npm run build
+          sudo systemctl restart expert-in-the-loop-dev
+          sleep 5
+          curl -sf http://localhost:5001 > /dev/null
+          echo "Dev app healthy"
+          DEPLOY_SCRIPT

@@ -25,6 +25,7 @@ export function setupAuth(app: Express) {
 
   app.use(
     session({
+      name: process.env.SESSION_COOKIE_NAME || "connect.sid",
       store: new PgSession({
         pool,
         tableName: "session",
