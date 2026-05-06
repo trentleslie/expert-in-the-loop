@@ -4,3 +4,17 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+
+# Environment and secrets
+.env
+
+# Python / analysis artifacts
+.venv
+pyproject.toml
+uv.lock
+q2q_*
+*.ipynb
+
+# Database backups
+*.dump
+backup.*

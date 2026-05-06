@@ -284,6 +284,27 @@ export async function registerRoutes(
         }
       }
 
+      // ── Same-source pair detection ───────────────────────────────────────
+      // Helper function to extract source prefix from question ID
+      const getSourcePrefix = (id: string): string => {
+        if (id.startsWith("arivale_")) return "arivale";
+        if (id.startsWith("il10k_")) return "il10k";
+        if (id.startsWith("ukbb_")) return "ukbb";
+        return "unknown";
+      };
+
+      // Filter out same-source pairs (invalid for cross-source harmonization)
+      const sameSourcePairs: string[] = [];
+      const crossSourcePairsData = pairsData.filter((p) => {
+        const sourcePrefix = getSourcePrefix(p.sourceId);
+        const targetPrefix = getSourcePrefix(p.targetId);
+        if (sourcePrefix !== "unknown" && sourcePrefix === targetPrefix) {
+          sameSourcePairs.push(`${p.sourceId} ↔ ${p.targetId}`);
+          return false;
+        }
+        return true;
+      });
+
       // ── Duplicate detection ───────────────────────────────────────────────
       // Fetch all existing source_id + target_id combinations for this campaign
       const existingPairsRaw = await storage.getPairIdentifiers(campaignId);
@@ -292,7 +313,7 @@ export async function registerRoutes(
       );
 
       const duplicates: string[] = [];
-      const uniquePairsData = pairsData.filter((p) => {
+      const uniquePairsData = crossSourcePairsData.filter((p) => {
         const key = `${p.sourceId}::${p.targetId}`;
         if (existingSet.has(key)) {
           duplicates.push(key);
@@ -302,21 +323,31 @@ export async function registerRoutes(
       });
 
       if (uniquePairsData.length === 0) {
+        const reasons: string[] = [];
+        if (duplicates.length > 0) reasons.push(`${duplicates.length} duplicate(s)`);
+        if (sameSourcePairs.length > 0) reasons.push(`${sameSourcePairs.length} same-source pair(s)`);
         return res.status(409).json({
-          message: `All ${pairsData.length} pair(s) already exist in this campaign. No new pairs were imported.`,
+          message: `No new pairs were imported. Skipped: ${reasons.join(", ")}.`,
           duplicateCount: duplicates.length,
+          sameSourceCount: sameSourcePairs.length,
           importedCount: 0,
         });
       }
 
       const count = await storage.createPairs(uniquePairsData);
 
+      const skippedMessages: string[] = [];
+      if (duplicates.length > 0) skippedMessages.push(`${duplicates.length} duplicate(s)`);
+      if (sameSourcePairs.length > 0) skippedMessages.push(`${sameSourcePairs.length} same-source pair(s)`);
+
       res.json({
         count,
-        message: `Successfully imported ${count} pair(s)${duplicates.length > 0 ? `. Skipped ${duplicates.length} duplicate(s).` : "."}`,
+        message: `Successfully imported ${count} pair(s)${skippedMessages.length > 0 ? `. Skipped: ${skippedMessages.join(", ")}.` : "."}`,
         importedCount: count,
         duplicateCount: duplicates.length,
+        sameSourceCount: sameSourcePairs.length,
         skippedDuplicates: duplicates.length > 0 ? duplicates : undefined,
+        skippedSameSource: sameSourcePairs.length > 0 ? sameSourcePairs : undefined,
       });
     } catch (error) {
       console.error("Error uploading pairs:", error);
