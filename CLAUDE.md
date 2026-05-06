@@ -1,0 +1,192 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Commands
+
+```bash
+npm run dev          # Start dev server (Vite HMR + Express on port 5000)
+npm run build        # Build client (Vite) + server (esbuild) → dist/
+npm run start        # Run production build: node dist/index.cjs
+npm run check        # TypeScript type checking
+npm run db:push      # Push Drizzle schema changes to PostgreSQL
+```
+
+## Architecture
+
+Full-stack TypeScript monorepo. A single Express process serves both the API (`/api/*`) and the React SPA (static files from `dist/public/`).
+
+```
+client/          React 18 SPA (Vite, Wouter router, TanStack Query, shadcn/ui + Tailwind)
+server/          Express API (Passport.js Google OAuth, Drizzle ORM, PostgreSQL)
+shared/          Shared schema: Drizzle table definitions + Zod validation (used by both sides)
+script/build.ts  Build orchestrator: Vite for client → dist/public/, esbuild for server → dist/index.cjs
+```
+
+### Data flow
+
+- **Auth**: Google OAuth 2.0 → Passport session stored in PostgreSQL `session` table. Domain whitelist via `allowed_domains` table. User roles: `reviewer` or `admin`.
+- **Client state**: TanStack Query (staleTime=Infinity, no auto-refetch). Auth state via React Context (`useAuth()` hook).
+- **Server routing**: All in `server/routes.ts`. Guards: `requireAuth`, `requireAdmin` middleware. Storage abstraction in `server/storage.ts`.
+
+### Key schema entities (shared/schema.ts)
+
+Users → Campaigns → Pairs → Votes. Campaigns have types (questionnaire_match, loinc_mapping, custom). Votes support binary (match/no_match/unsure) or numeric scoring. Supporting tables: AllowedDomains, SkippedPairs, ImportTemplates.
+
+### Path aliases
+
+`@/*` → `client/src/`, `@shared/*` → `shared/`, `@assets/*` → `attached_assets/` (configured in vite.config.ts and tsconfig.json)
+
+## Deployment (AWS Lightsail)
+
+**Instance**: `expert-in-the-loop-upgraded` at `35.161.242.62`
+**SSH**: `ssh -i ~/.ssh/lightsail-expert.pem ubuntu@35.161.242.62`
+
+Stack: Ubuntu 22.04, Node.js 20, Python 3.11, PostgreSQL 16, nginx reverse proxy, Let's Encrypt SSL (auto-renew), systemd services.
+
+### Hosted Applications
+
+| App | URL | Port | Service | Stack |
+|-----|-----|------|---------|-------|
+| Expert-in-the-Loop | https://expertintheloop.io | 5000 | `expert-in-the-loop` | Node.js/Express |
+| PGS Catalog Explorer | https://pgsc.expertintheloop.io | 8501 | `pgs-catalog-explorer` | Python/Streamlit |
+| KRAKEN Chatbot | https://kraken.expertintheloop.io | 8000 | `kraken-backend` | React + Python/FastAPI |
+
+```
+/home/ubuntu/
+├── expert-in-the-loop/      # This repo (Node.js, port 5000)
+├── pgs-catalog-explorer/    # Streamlit app (Python, port 8501)
+└── kraken-chatbot/          # KRAKEN KG chat (React + FastAPI, port 8000)
+```
+
+### AWS infrastructure
+
+- **Region**: us-west-2a
+- **Instance**: `expert-in-the-loop-upgraded` (bundle: `large_3_0`, 8GB RAM, blueprint: `ubuntu_22_04`)
+- **Static IP**: `expert-in-the-loop-ip` → `35.161.242.62`
+- **Domain**: `expertintheloop.io` (DNS A records on Squarespace pointing to static IP)
+- **Subdomains**: `pgsc.expertintheloop.io` (PGS Catalog), `kraken.expertintheloop.io` (KRAKEN Chatbot) → same static IP
+- **Open ports**: 22 (SSH), 80 (HTTP → redirects to HTTPS), 443 (HTTPS), 5000 (direct app access)
+- **SSL**: Let's Encrypt via certbot with nginx plugin, auto-renews via systemd timer
+
+```bash
+# Useful AWS CLI commands (run from local machine)
+aws lightsail get-instance --instance-name expert-in-the-loop-upgraded
+aws lightsail get-static-ip --static-ip-name expert-in-the-loop-ip
+aws lightsail get-instance-metric-data --instance-name expert-in-the-loop-upgraded \
+  --metric-name CPUUtilization --period 300 --unit Percent \
+  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) --statistics Average
+```
+
+### Database
+
+- **PostgreSQL 16** (from PGDG apt repo, not Ubuntu default PG 14)
+- **Cluster**: 16/main on port 5432
+- **User**: `expertuser`, **Database**: `expertloop`
+- **Auth**: md5 (configured in `/etc/postgresql/16/main/pg_hba.conf`)
+- **Backup**: `pg_dump -U expertuser -h localhost -Fc expertloop > backup.dump`
+- **Restore**: `pg_restore -U expertuser -d expertloop -h localhost --no-owner --no-privileges backup.dump`
+
+### Manual Deploy workflow (alternative)
+
+```bash
+# SSH into Lightsail
+ssh -i ~/.ssh/lightsail-expert.pem ubuntu@35.161.242.62
+
+# Pull, rebuild, restart
+cd ~/expert-in-the-loop
+git remote set-url origin https://<GITHUB_PAT>@github.com/trentleslie/expert-in-the-loop.git
+git pull origin main
+git remote set-url origin https://github.com/trentleslie/expert-in-the-loop.git
+npm run build
+sudo systemctl restart expert-in-the-loop
+```
+
+### Automated Deployment (GitHub Actions)
+
+Pushing to `main` triggers automatic deployment via GitHub Actions:
+
+1. SSHs into Lightsail using deploy key
+2. Pulls latest code from `main`
+3. Runs `npm ci` and `npm run build`
+4. Restarts the systemd service
+5. Health check verifies app responds on port 5000
+
+**Workflow file**: `.github/workflows/lightsail-deploy.yml`
+**Actions URL**: https://github.com/trentleslie/expert-in-the-loop/actions
+
+To trigger manually: Go to Actions → "Deploy to Lightsail" → "Run workflow"
+
+**GitHub Secrets** (manage via `gh secret set`, not web UI):
+| Secret | Purpose |
+|--------|---------|
+| `LIGHTSAIL_SSH_KEY` | Base64-encoded SSH private key |
+| `LIGHTSAIL_HOST` | Server IP (35.161.242.62) |
+| `LIGHTSAIL_USER` | SSH user (ubuntu) |
+
+### Service management
+
+```bash
+# Expert-in-the-Loop (Node.js)
+sudo systemctl status expert-in-the-loop
+sudo systemctl restart expert-in-the-loop
+sudo journalctl -u expert-in-the-loop -f
+
+# PGS Catalog Explorer (Streamlit)
+sudo systemctl status pgs-catalog-explorer
+sudo systemctl restart pgs-catalog-explorer
+sudo journalctl -u pgs-catalog-explorer -f
+
+# KRAKEN Chatbot (FastAPI)
+sudo systemctl status kraken-backend
+sudo systemctl restart kraken-backend
+sudo journalctl -u kraken-backend -f
+
+# Nginx
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+### PGS Catalog Explorer deploy workflow
+
+```bash
+cd ~/pgs-catalog-explorer
+git pull origin main
+sudo systemctl restart pgs-catalog-explorer
+```
+
+Dependencies managed via `uv` (lockfile: `uv.lock`). To update dependencies:
+```bash
+cd ~/pgs-catalog-explorer
+source .venv/bin/activate
+uv sync
+sudo systemctl restart pgs-catalog-explorer
+```
+
+### KRAKEN Chatbot deploy workflow
+
+Automated via GitHub Actions (push to `main` triggers deploy). Manual workflow:
+
+```bash
+cd ~/kraken-chatbot
+git pull origin main
+npm ci && VITE_WS_URL=wss://kraken.expertintheloop.io/ws/chat npm run build
+cd backend && uv sync
+sudo systemctl restart kraken-backend
+```
+
+**Authentication**: Uses Claude CLI OAuth. To re-authenticate:
+```bash
+claude login  # Opens browser for OAuth (may require SSH with X forwarding or setup-token)
+```
+
+### Environment
+
+Production `.env` on Lightsail (`/home/ubuntu/expert-in-the-loop/.env`):
+`DATABASE_URL`, `NODE_ENV`, `PORT`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, `APP_URL`
+
+**Note**: `APP_URL` (e.g., `https://expertintheloop.io`) is used to construct the OAuth callback URL. Express has `trust proxy` enabled for nginx `X-Forwarded-Proto` headers. The systemd `EnvironmentFile` does not handle special characters like `!` in values — use only alphanumeric passwords.
+
+### OAuth
+
+Google Cloud Console must have `https://expertintheloop.io/api/auth/google/callback` as an authorized redirect URI. The `APP_URL` env var controls callback URL generation in `server/auth.ts`.
