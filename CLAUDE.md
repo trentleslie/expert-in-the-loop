@@ -12,6 +12,10 @@ npm run check        # TypeScript type checking
 npm run db:push      # Push Drizzle schema changes to PostgreSQL
 ```
 
+## Documented Solutions
+
+`docs/solutions/` — documented solutions to past problems (runtime errors, deployment issues, workflow patterns), organized by category with YAML frontmatter (`module`, `tags`, `problem_type`). Relevant when debugging or implementing in documented areas.
+
 ## Architecture
 
 Full-stack TypeScript monorepo. A single Express process serves both the API (`/api/*`) and the React SPA (static files from `dist/public/`).
