@@ -7,36 +7,46 @@ type AuthContextType = {
   isLoading: boolean;
   isAuthenticated: boolean;
   isAdmin: boolean;
+  error: string | null;
   logout: () => Promise<void>;
   refetch: () => void;
 };
 
 export function useAuth(): AuthContextType {
   const { isSignedIn, isLoaded: clerkLoaded } = useClerkAuth();
-  const { user: clerkUser, isLoaded: userLoaded } = useUser();
+  const { isLoaded: userLoaded } = useUser();
   const { signOut } = useClerk();
 
   // Fetch local user data (with role) from our API once Clerk is authenticated
   const {
     data,
     isLoading: queryLoading,
+    error: queryError,
     refetch,
   } = useQuery<{ user: User } | null>({
     queryKey: ["/api/auth/me"],
-    retry: false,
+    retry: 2,
     staleTime: 1000 * 60 * 5,
     enabled: !!isSignedIn,
   });
 
   const isLoading = !clerkLoaded || !userLoaded || (isSignedIn && queryLoading);
   const user = data?.user ?? null;
-  const isAuthenticated = !!isSignedIn && !!user;
+
+  // Treat as authenticated if Clerk says signed in AND either:
+  // - we have user data, OR
+  // - the query errored (user IS signed in, server just failed)
+  // This prevents redirect loops when /api/auth/me is temporarily down
+  const isAuthenticated = !!isSignedIn && (!!user || !!queryError);
   const isAdmin = user?.role === "admin";
+  const error = queryError
+    ? "Unable to load user data. Some features may be unavailable."
+    : null;
 
   const logout = async () => {
     await signOut();
     window.location.href = "/login";
   };
 
-  return { user, isLoading, isAuthenticated, isAdmin, logout, refetch };
+  return { user, isLoading, isAuthenticated, isAdmin, error, logout, refetch };
 }
