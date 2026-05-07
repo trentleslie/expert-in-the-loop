@@ -1,14 +1,14 @@
-import { Switch, Route, Redirect } from "wouter";
+import { Switch, Route, Redirect, useLocation } from "wouter";
+import { ClerkProvider, SignIn, SignUp } from "@clerk/react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
-import { AuthProvider, useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/auth";
 import { AppLayout } from "@/components/app-layout";
 import { Skeleton } from "@/components/ui/skeleton";
 
-import LoginPage from "@/pages/login";
 import HomePage from "@/pages/home";
 import ReviewPage from "@/pages/review";
 import StatsPage from "@/pages/stats";
@@ -17,12 +17,14 @@ import AdminDashboard from "@/pages/admin/dashboard";
 import AdminCampaigns from "@/pages/admin/campaigns";
 import AdminResults from "@/pages/admin/results";
 import AdminDatabase from "@/pages/admin/database";
-import AdminDomains from "@/pages/admin/domains";
 import AdminUsers from "@/pages/admin/users";
 import AdminSettings from "@/pages/admin/settings";
 import AdminAnalytics from "@/pages/admin/analytics";
 import AdminUpload from "@/pages/admin/upload";
 import NotFound from "@/pages/not-found";
+
+const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
+const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
 
 function LoadingScreen() {
   return (
@@ -36,10 +38,10 @@ function LoadingScreen() {
   );
 }
 
-function ProtectedRoute({ 
-  children, 
-  requireAdmin = false 
-}: { 
+function ProtectedRoute({
+  children,
+  requireAdmin = false,
+}: {
   children: React.ReactNode;
   requireAdmin?: boolean;
 }) {
@@ -74,13 +76,35 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function ClerkSignInPage() {
+  return (
+    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <SignIn routing="path" path="/login" signUpUrl="/sign-up" />
+    </div>
+  );
+}
+
+function ClerkSignUpPage() {
+  return (
+    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <SignUp routing="path" path="/sign-up" signInUrl="/login" />
+    </div>
+  );
+}
+
 function Router() {
   return (
     <Switch>
       {/* Public routes */}
       <Route path="/login">
         <PublicRoute>
-          <LoginPage />
+          <ClerkSignInPage />
+        </PublicRoute>
+      </Route>
+
+      <Route path="/sign-up">
+        <PublicRoute>
+          <ClerkSignUpPage />
         </PublicRoute>
       </Route>
 
@@ -140,12 +164,6 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
-      <Route path="/admin/domains">
-        <ProtectedRoute requireAdmin>
-          <AdminDomains />
-        </ProtectedRoute>
-      </Route>
-
       <Route path="/admin/users">
         <ProtectedRoute requireAdmin>
           <AdminUsers />
@@ -171,17 +189,28 @@ function Router() {
 }
 
 function App() {
+  const [, setLocation] = useLocation();
+
   return (
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider defaultTheme="system" storageKey="entity-validator-theme">
-        <TooltipProvider>
-          <AuthProvider>
+    <ClerkProvider
+      publishableKey={clerkPubKey}
+      proxyUrl={clerkProxyUrl}
+      routerPush={(to) => setLocation(to)}
+      routerReplace={(to) => setLocation(to, { replace: true })}
+      signInUrl="/login"
+      signUpUrl="/sign-up"
+      signInFallbackRedirectUrl="/"
+      afterSignOutUrl="/login"
+    >
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider defaultTheme="system" storageKey="entity-validator-theme">
+          <TooltipProvider>
             <Router />
             <Toaster />
-          </AuthProvider>
-        </TooltipProvider>
-      </ThemeProvider>
-    </QueryClientProvider>
+          </TooltipProvider>
+        </ThemeProvider>
+      </QueryClientProvider>
+    </ClerkProvider>
   );
 }
 

@@ -1,11 +1,11 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import passport from "passport";
+import { getAuth, clerkClient } from "@clerk/express";
 import multer from "multer";
 import { parse } from "csv-parse/sync";
 import { stringify } from "csv-stringify/sync";
 import { storage } from "./storage";
-import { setupAuth, requireAuth, requireAdmin } from "./auth";
+import { requireAuth, requireAdmin } from "./auth";
 import { insertCampaignSchema, insertVoteSchema, type InsertPair } from "@shared/schema";
 import { z } from "zod";
 
@@ -15,62 +15,37 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Setup authentication
-  setupAuth(app);
-
   // ==================== AUTH ROUTES ====================
 
-  // Google OAuth - initiate login
-  app.get("/api/auth/google", (req, res, next) => {
-    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-      return res.redirect("/login?error=oauth_not_configured");
-    }
-    passport.authenticate("google", { scope: ["profile", "email"] })(req, res, next);
-  });
+  // Get current user (find-or-create on first call)
+  // Uses requireAuth to enforce domain whitelist before creating local records
+  app.get("/api/auth/me", requireAuth, async (req, res) => {
+    const auth = getAuth(req);
+    const userId = auth.userId!; // guaranteed by requireAuth
 
-  // Google OAuth callback
-  app.get(
-    "/api/auth/google/callback",
-    (req, res, next) => {
-      passport.authenticate("google", (err: Error | null, user: Express.User | false, info: { message?: string }) => {
-        if (err) {
-          console.error("Google OAuth error:", err);
-          return res.redirect("/login?error=auth_failed");
-        }
-        if (!user) {
-          const errorType = info?.message === "domain_not_allowed" ? "domain_not_allowed" : "auth_failed";
-          return res.redirect(`/login?error=${errorType}`);
-        }
-        req.logIn(user, (loginErr) => {
-          if (loginErr) {
-            console.error("Login error:", loginErr);
-            return res.redirect("/login?error=auth_failed");
-          }
-          return res.redirect("/");
+    try {
+      // Find or create user in local database
+      let user = await storage.getUser(userId);
+      if (!user) {
+        // Only call Clerk API during find-or-create (not on every request)
+        const clerkUser = await clerkClient.users.getUser(userId);
+        const email =
+          clerkUser.primaryEmailAddress?.emailAddress || "unknown@unknown.com";
+        user = await storage.createUser({
+          id: userId,
+          email,
+          displayName:
+            clerkUser.fullName ||
+            clerkUser.firstName ||
+            email.split("@")[0],
+          role: ((clerkUser.publicMetadata as Record<string, unknown>)?.role as "reviewer" | "admin") || "reviewer",
         });
-      })(req, res, next);
-    }
-  );
-
-  // Logout
-  app.post("/api/auth/logout", (req, res) => {
-    req.logout((err) => {
-      if (err) {
-        return res.status(500).json({ message: "Logout failed" });
       }
-      req.session.destroy((destroyErr) => {
-        res.clearCookie("connect.sid");
-        res.json({ success: true });
-      });
-    });
-  });
-
-  // Get current user
-  app.get("/api/auth/me", (req, res) => {
-    if (req.isAuthenticated() && req.user) {
-      return res.json({ user: req.user });
+      return res.json({ user });
+    } catch (error) {
+      console.error("Error fetching user:", error);
+      return res.status(500).json({ message: "Failed to fetch user" });
     }
-    return res.status(401).json({ message: "Not authenticated" });
   });
 
   // ==================== CAMPAIGN ROUTES ====================
@@ -116,7 +91,7 @@ export async function registerRoutes(
     try {
       const validatedData = insertCampaignSchema.parse({
         ...req.body,
-        createdBy: req.user!.id,
+        createdBy: getAuth(req).userId!,
         status: "draft",
       });
       const campaign = await storage.createCampaign(validatedData);
@@ -359,7 +334,7 @@ export async function registerRoutes(
   app.get("/api/campaigns/:id/next-pair", requireAuth, async (req, res) => {
     try {
       const campaignId = req.params.id;
-      const userId = req.user!.id;
+      const userId = getAuth(req).userId!;
 
       const pair = await storage.getNextPairForUser(campaignId, userId);
       const progress = await storage.getCampaignProgress(campaignId);
@@ -471,7 +446,7 @@ export async function registerRoutes(
   app.post("/api/pairs/:id/vote", requireAuth, async (req, res) => {
     try {
       const pairId = req.params.id;
-      const userId = req.user!.id;
+      const userId = getAuth(req).userId!;
 
       const voteData = insertVoteSchema.parse({
         pairId,
@@ -504,7 +479,7 @@ export async function registerRoutes(
   app.post("/api/pairs/:id/skip", requireAuth, async (req, res) => {
     try {
       const pairId = req.params.id;
-      const userId = req.user!.id;
+      const userId = getAuth(req).userId!;
 
       await storage.skipPair(pairId, userId);
       res.json({ success: true });
@@ -527,13 +502,18 @@ export async function registerRoutes(
     }
   });
 
-  // Update user role (admin only)
+  // Update user role (admin only) — updates Clerk publicMetadata (authoritative) and local DB (cache)
   app.patch("/api/users/:id/role", requireAdmin, async (req, res) => {
     try {
       const { role } = req.body;
       if (!["reviewer", "admin"].includes(role)) {
         return res.status(400).json({ message: "Invalid role" });
       }
+      // Update Clerk publicMetadata (authoritative source for role)
+      await clerkClient.users.updateUser(req.params.id, {
+        publicMetadata: { role },
+      });
+      // Update local DB (cache/audit)
       await storage.updateUserRole(req.params.id, role);
       res.json({ success: true });
     } catch (error) {
@@ -545,7 +525,7 @@ export async function registerRoutes(
   // Get current user stats
   app.get("/api/users/me/stats", requireAuth, async (req, res) => {
     try {
-      const userId = req.user!.id;
+      const userId = getAuth(req).userId!;
       const stats = await storage.getUserStats(userId);
       res.json(stats);
     } catch (error) {
@@ -557,7 +537,7 @@ export async function registerRoutes(
   // Get current user's vote history
   app.get("/api/users/me/votes", requireAuth, async (req, res) => {
     try {
-      const userId = req.user!.id;
+      const userId = getAuth(req).userId!;
       const userVotes = await storage.getUserVotes(userId);
       res.json(userVotes);
     } catch (error) {
@@ -570,7 +550,7 @@ export async function registerRoutes(
   app.patch("/api/pairs/:id/vote", requireAuth, async (req, res) => {
     try {
       const pairId = req.params.id;
-      const userId = req.user!.id;
+      const userId = getAuth(req).userId!;
       
       const { scoreBinary, scoreNumeric, scoringMode, expertSelectedCode, reviewerNotes } = req.body;
       
@@ -606,55 +586,9 @@ export async function registerRoutes(
     }
   });
 
-  // Get allowed domains
-  app.get("/api/admin/domains", requireAdmin, async (req, res) => {
-    try {
-      const domains = await storage.getAllowedDomains();
-      res.json(domains);
-    } catch (error) {
-      console.error("Error fetching domains:", error);
-      res.status(500).json({ message: "Failed to fetch domains" });
-    }
-  });
-
-  // Add allowed domain
-  app.post("/api/admin/domains", requireAdmin, async (req, res) => {
-    try {
-      const { domain } = req.body;
-      if (!domain || typeof domain !== "string") {
-        return res.status(400).json({ message: "Domain is required" });
-      }
-      
-      const normalizedDomain = domain.trim().toLowerCase();
-      const domainRegex = /^[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,}$/;
-      if (!domainRegex.test(normalizedDomain)) {
-        return res.status(400).json({ message: "Invalid domain format. Use format: example.com" });
-      }
-      
-      const created = await storage.addAllowedDomain({
-        domain: normalizedDomain,
-        addedBy: req.user!.id,
-      });
-      res.status(201).json(created);
-    } catch (error: any) {
-      console.error("Error adding domain:", error);
-      if (error.code === "23505") {
-        return res.status(409).json({ message: "Domain already exists" });
-      }
-      res.status(500).json({ message: "Failed to add domain" });
-    }
-  });
-
-  // Remove allowed domain
-  app.delete("/api/admin/domains/:domain", requireAdmin, async (req, res) => {
-    try {
-      await storage.removeAllowedDomain(req.params.domain);
-      res.json({ success: true });
-    } catch (error) {
-      console.error("Error removing domain:", error);
-      res.status(500).json({ message: "Failed to remove domain" });
-    }
-  });
+  // Domain management is now handled via Clerk Dashboard allowlist
+  // and the ALLOWED_EMAIL_DOMAINS environment variable.
+  // The /api/admin/domains routes have been removed.
 
   // ==================== INTER-RATER RELIABILITY ====================
 
@@ -693,7 +627,7 @@ export async function registerRoutes(
         name,
         description: description || null,
         columnMappings,
-        createdBy: req.user!.id,
+        createdBy: getAuth(req).userId!,
       });
       res.status(201).json(template);
     } catch (error) {
