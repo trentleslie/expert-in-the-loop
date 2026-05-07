@@ -100,6 +100,11 @@ function validateAuthAndDomain(
   const claims = auth.sessionClaims as Record<string, unknown>;
   const email = (claims?.primary_email as string) || "";
 
+  // Debug: log claims to diagnose domain check failures
+  if (!email) {
+    console.error("[auth] primary_email claim is empty. Session claims:", JSON.stringify(claims));
+  }
+
   if (!isEmailAllowed(email)) {
     res.status(403).json({ message: "Access restricted to authorized domains" });
     return null;
