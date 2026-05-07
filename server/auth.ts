@@ -1,141 +1,118 @@
-import passport from "passport";
-import { Strategy as GoogleStrategy } from "passport-google-oauth20";
-import session from "express-session";
-import { storage } from "./storage";
+import { clerkMiddleware, getAuth, clerkClient } from "@clerk/express";
+import { createProxyMiddleware } from "http-proxy-middleware";
 import type { Express, RequestHandler } from "express";
-import type { User } from "@shared/schema";
-import connectPgSimple from "connect-pg-simple";
-import { pool } from "./db";
 
-declare global {
-  namespace Express {
-    interface User {
-      id: string;
-      email: string;
-      displayName: string;
-      role: "reviewer" | "admin";
-      createdAt: Date;
-      lastActive: Date;
-    }
+const CLERK_FAPI = "https://frontend-api.clerk.dev";
+const CLERK_PROXY_PATH = "/api/__clerk";
+
+const rawDomains = process.env.ALLOWED_EMAIL_DOMAINS || "";
+const ALLOWED_EMAIL_DOMAINS = rawDomains
+  .split(",")
+  .map((d) => d.trim().toLowerCase())
+  .filter(Boolean);
+
+const rawEmails = process.env.ALLOWED_EMAILS || "";
+const ALLOWED_EMAILS_SET = new Set(
+  rawEmails
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+function clerkProxyMiddleware(): RequestHandler {
+  if (process.env.NODE_ENV !== "production") {
+    return (_req, _res, next) => next();
   }
+
+  const secretKey = process.env.CLERK_SECRET_KEY;
+  if (!secretKey) {
+    return (_req, _res, next) => next();
+  }
+
+  return createProxyMiddleware({
+    target: CLERK_FAPI,
+    changeOrigin: true,
+    pathRewrite: (path: string) =>
+      path.replace(new RegExp(`^${CLERK_PROXY_PATH}`), ""),
+    on: {
+      proxyReq: (proxyReq, req) => {
+        const protocol = req.headers["x-forwarded-proto"] || "https";
+        const host = req.headers.host || "";
+        const proxyUrl = `${protocol}://${host}${CLERK_PROXY_PATH}`;
+
+        proxyReq.setHeader("Clerk-Proxy-Url", proxyUrl);
+        proxyReq.setHeader("Clerk-Secret-Key", secretKey);
+
+        const xff = req.headers["x-forwarded-for"];
+        const clientIp =
+          (Array.isArray(xff) ? xff[0] : xff)?.split(",")[0]?.trim() ||
+          req.socket?.remoteAddress ||
+          "";
+        if (clientIp) {
+          proxyReq.setHeader("X-Forwarded-For", clientIp);
+        }
+      },
+    },
+  }) as RequestHandler;
 }
 
 export function setupAuth(app: Express) {
-  const PgSession = connectPgSimple(session);
+  // FAPI proxy must be mounted before body parsers
+  app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
-  app.use(
-    session({
-      name: process.env.SESSION_COOKIE_NAME || "connect.sid",
-      store: new PgSession({
-        pool,
-        tableName: "session",
-        createTableIfMissing: true,
-      }),
-      secret: process.env.SESSION_SECRET || "entity-validator-session-secret-dev",
-      resave: false,
-      saveUninitialized: false,
-      cookie: {
-        secure: process.env.NODE_ENV === "production",
-        httpOnly: true,
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-        sameSite: "lax",
-      },
-    })
-  );
-
-  app.use(passport.initialize());
-  app.use(passport.session());
-
-  // Only configure Google OAuth if credentials are provided
-  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
-    const getCallbackURL = () => {
-      if (process.env.APP_URL) {
-        return `${process.env.APP_URL}/api/auth/google/callback`;
-      }
-      if (process.env.REPLIT_DEPLOYMENT_URL) {
-        return `https://${process.env.REPLIT_DEPLOYMENT_URL}/api/auth/google/callback`;
-      }
-      if (process.env.REPLIT_DEV_DOMAIN) {
-        return `https://${process.env.REPLIT_DEV_DOMAIN}/api/auth/google/callback`;
-      }
-      return "/api/auth/google/callback";
-    };
-
-    passport.use(
-      new GoogleStrategy(
-        {
-          clientID: process.env.GOOGLE_CLIENT_ID,
-          clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-          callbackURL: getCallbackURL(),
-          scope: ["profile", "email"],
-        },
-        async (_accessToken, _refreshToken, profile, done) => {
-          try {
-            const email = profile.emails?.[0]?.value;
-            if (!email) {
-              return done(null, false, { message: "No email found in Google profile" });
-            }
-
-            // Check if domain is allowed
-            const domain = email.split("@")[1];
-            const isDomainAllowed = await storage.isDomainAllowed(domain);
-            
-            if (!isDomainAllowed) {
-              return done(null, false, { message: "domain_not_allowed" });
-            }
-
-            // Find or create user
-            let user = await storage.getUserByEmail(email);
-            
-            if (!user) {
-              // Create new user
-              user = await storage.createUser({
-                id: profile.id,
-                email,
-                displayName: profile.displayName || email.split("@")[0],
-                role: "reviewer",
-              });
-            } else {
-              // Update last active
-              await storage.updateUserLastActive(user.id);
-            }
-
-            return done(null, user);
-          } catch (error) {
-            return done(error as Error);
-          }
-        }
-      )
-    );
-  }
-
-  passport.serializeUser((user, done) => {
-    done(null, user.id);
-  });
-
-  passport.deserializeUser(async (id: string, done) => {
-    try {
-      const user = await storage.getUser(id);
-      done(null, user || null);
-    } catch (error) {
-      done(error);
-    }
-  });
+  // Clerk middleware populates auth state for getAuth(req)
+  app.use(clerkMiddleware());
 }
 
-export const requireAuth: RequestHandler = (req, res, next) => {
-  if (!req.isAuthenticated()) {
+export const requireAuth: RequestHandler = async (req, res, next) => {
+  const auth = getAuth(req);
+  if (!auth?.userId) {
     return res.status(401).json({ message: "Unauthorized" });
   }
+
+  // Fail closed: if ALLOWED_EMAIL_DOMAINS is not configured, deny all
+  if (ALLOWED_EMAIL_DOMAINS.length === 0 && ALLOWED_EMAILS_SET.size === 0) {
+    return res.status(403).json({ message: "No allowed domains configured" });
+  }
+
+  try {
+    const user = await clerkClient.users.getUser(auth.userId);
+    const primaryEmail = (
+      user.primaryEmailAddress?.emailAddress || ""
+    ).toLowerCase();
+    const emailDomain = primaryEmail.split("@")[1] || "";
+
+    const isAllowed =
+      ALLOWED_EMAILS_SET.has(primaryEmail) ||
+      ALLOWED_EMAIL_DOMAINS.includes(emailDomain);
+
+    if (!isAllowed) {
+      return res
+        .status(403)
+        .json({ message: "Access restricted to authorized domains" });
+    }
+  } catch (err) {
+    console.error("Failed to validate user domain:", err);
+    return res
+      .status(500)
+      .json({ message: "Could not verify access permissions" });
+  }
+
   next();
 };
 
 export const requireAdmin: RequestHandler = (req, res, next) => {
-  if (!req.isAuthenticated()) {
+  const auth = getAuth(req);
+  if (!auth?.userId) {
     return res.status(401).json({ message: "Unauthorized" });
   }
-  if (req.user?.role !== "admin") {
-    return res.status(403).json({ message: "Forbidden: Admin access required" });
+
+  const role = (auth.sessionClaims as Record<string, unknown>)?.role;
+  if (role !== "admin") {
+    return res
+      .status(403)
+      .json({ message: "Forbidden: Admin access required" });
   }
+
   next();
 };

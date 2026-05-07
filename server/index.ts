@@ -1,5 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
+import { setupAuth } from "./auth";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 
@@ -12,6 +13,9 @@ declare module "http" {
     rawBody: unknown;
   }
 }
+
+// Clerk FAPI proxy and middleware MUST be mounted before body parsers
+setupAuth(app);
 
 app.use(
   express.json({
