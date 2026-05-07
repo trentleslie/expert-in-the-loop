@@ -24,22 +24,31 @@ export async function registerRoutes(
     const userId = auth.userId!; // guaranteed by requireAuth
 
     try {
-      // Find or create user in local database
+      // Find by Clerk userId first, then fall back to email lookup
+      // (handles migration from Google OAuth IDs to Clerk IDs)
       let user = await storage.getUser(userId);
       if (!user) {
-        // Only call Clerk API during find-or-create (not on every request)
         const clerkUser = await clerkClient.users.getUser(userId);
         const email =
           clerkUser.primaryEmailAddress?.emailAddress || "unknown@unknown.com";
-        user = await storage.createUser({
-          id: userId,
-          email,
-          displayName:
-            clerkUser.fullName ||
-            clerkUser.firstName ||
-            email.split("@")[0],
-          role: ((clerkUser.publicMetadata as Record<string, unknown>)?.role as "reviewer" | "admin") || "reviewer",
-        });
+
+        // Check if user exists with this email but a different (old) ID
+        const existingByEmail = await storage.getUserByEmail(email);
+        if (existingByEmail) {
+          // Migrate: update the old ID to the new Clerk ID
+          await storage.updateUserId(existingByEmail.id, userId);
+          user = await storage.getUser(userId);
+        } else {
+          user = await storage.createUser({
+            id: userId,
+            email,
+            displayName:
+              clerkUser.fullName ||
+              clerkUser.firstName ||
+              email.split("@")[0],
+            role: ((clerkUser.publicMetadata as Record<string, unknown>)?.role as "reviewer" | "admin") || "reviewer",
+          });
+        }
       }
       return res.json({ user });
     } catch (error) {

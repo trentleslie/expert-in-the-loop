@@ -19,6 +19,7 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   updateUserLastActive(id: string): Promise<void>;
   updateUserRole(id: string, role: "reviewer" | "admin"): Promise<void>;
+  updateUserId(oldId: string, newId: string): Promise<void>;
   getAllUsers(): Promise<(User & { voteCount: number })[]>;
   getRecentUsers(limit: number): Promise<User[]>;
   
@@ -228,6 +229,10 @@ export class DatabaseStorage implements IStorage {
 
   async updateUserRole(id: string, role: "reviewer" | "admin"): Promise<void> {
     await db.update(users).set({ role }).where(eq(users.id, id));
+  }
+
+  async updateUserId(oldId: string, newId: string): Promise<void> {
+    await db.update(users).set({ id: newId }).where(eq(users.id, oldId));
   }
 
   async getAllUsers(): Promise<(User & { voteCount: number })[]> {
