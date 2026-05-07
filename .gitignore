@@ -7,6 +7,8 @@ vite.config.ts.*
 
 # Environment and secrets
 .env
+.env.local
+.clerk/
 
 # Python / analysis artifacts
 .venv
