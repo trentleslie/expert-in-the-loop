@@ -1,4 +1,4 @@
-import { clerkMiddleware, getAuth, clerkClient } from "@clerk/express";
+import { clerkMiddleware, getAuth } from "@clerk/express";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import type { Express, RequestHandler } from "express";
 
@@ -19,6 +19,15 @@ const ALLOWED_EMAILS_SET = new Set(
     .filter(Boolean)
 );
 
+/** Check if an email is allowed by domain or exact match. */
+function isEmailAllowed(email: string): boolean {
+  if (!email) return false;
+  const lower = email.toLowerCase();
+  if (ALLOWED_EMAILS_SET.has(lower)) return true;
+  const domain = lower.split("@")[1] || "";
+  return ALLOWED_EMAIL_DOMAINS.includes(domain);
+}
+
 function clerkProxyMiddleware(): RequestHandler {
   if (process.env.NODE_ENV !== "production") {
     return (_req, _res, next) => next();
@@ -26,6 +35,9 @@ function clerkProxyMiddleware(): RequestHandler {
 
   const secretKey = process.env.CLERK_SECRET_KEY;
   if (!secretKey) {
+    console.error(
+      "[auth] CLERK_SECRET_KEY is not set — FAPI proxy is disabled in production"
+    );
     return (_req, _res, next) => next();
   }
 
@@ -64,51 +76,49 @@ export function setupAuth(app: Express) {
   app.use(clerkMiddleware());
 }
 
-export const requireAuth: RequestHandler = async (req, res, next) => {
+/**
+ * Shared auth + domain gate. Used by both requireAuth and requireAdmin.
+ * Returns the session claims if authorized, or sends an error response and returns null.
+ */
+function validateAuthAndDomain(
+  req: Parameters<RequestHandler>[0],
+  res: Parameters<RequestHandler>[1]
+): Record<string, unknown> | null {
   const auth = getAuth(req);
   if (!auth?.userId) {
-    return res.status(401).json({ message: "Unauthorized" });
+    res.status(401).json({ message: "Unauthorized" });
+    return null;
   }
 
-  // Fail closed: if ALLOWED_EMAIL_DOMAINS is not configured, deny all
+  // Fail closed: if no domains/emails configured, deny all
   if (ALLOWED_EMAIL_DOMAINS.length === 0 && ALLOWED_EMAILS_SET.size === 0) {
-    return res.status(403).json({ message: "No allowed domains configured" });
+    res.status(403).json({ message: "No allowed domains configured" });
+    return null;
   }
 
-  try {
-    const user = await clerkClient.users.getUser(auth.userId);
-    const primaryEmail = (
-      user.primaryEmailAddress?.emailAddress || ""
-    ).toLowerCase();
-    const emailDomain = primaryEmail.split("@")[1] || "";
+  // Domain check using session claims (no Clerk API call)
+  const claims = auth.sessionClaims as Record<string, unknown>;
+  const email = (claims?.primary_email as string) || "";
 
-    const isAllowed =
-      ALLOWED_EMAILS_SET.has(primaryEmail) ||
-      ALLOWED_EMAIL_DOMAINS.includes(emailDomain);
-
-    if (!isAllowed) {
-      return res
-        .status(403)
-        .json({ message: "Access restricted to authorized domains" });
-    }
-  } catch (err) {
-    console.error("Failed to validate user domain:", err);
-    return res
-      .status(500)
-      .json({ message: "Could not verify access permissions" });
+  if (!isEmailAllowed(email)) {
+    res.status(403).json({ message: "Access restricted to authorized domains" });
+    return null;
   }
 
+  return claims;
+}
+
+export const requireAuth: RequestHandler = (req, res, next) => {
+  const claims = validateAuthAndDomain(req, res);
+  if (!claims) return;
   next();
 };
 
 export const requireAdmin: RequestHandler = (req, res, next) => {
-  const auth = getAuth(req);
-  if (!auth?.userId) {
-    return res.status(401).json({ message: "Unauthorized" });
-  }
+  const claims = validateAuthAndDomain(req, res);
+  if (!claims) return;
 
-  const role = (auth.sessionClaims as Record<string, unknown>)?.role;
-  if (role !== "admin") {
+  if (claims.role !== "admin") {
     return res
       .status(403)
       .json({ message: "Forbidden: Admin access required" });

@@ -18,21 +18,21 @@ export async function registerRoutes(
   // ==================== AUTH ROUTES ====================
 
   // Get current user (find-or-create on first call)
-  app.get("/api/auth/me", async (req, res) => {
+  // Uses requireAuth to enforce domain whitelist before creating local records
+  app.get("/api/auth/me", requireAuth, async (req, res) => {
     const auth = getAuth(req);
-    if (!auth?.userId) {
-      return res.status(401).json({ message: "Not authenticated" });
-    }
+    const userId = auth.userId!; // guaranteed by requireAuth
 
     try {
       // Find or create user in local database
-      let user = await storage.getUser(auth.userId);
+      let user = await storage.getUser(userId);
       if (!user) {
-        const clerkUser = await clerkClient.users.getUser(auth.userId);
+        // Only call Clerk API during find-or-create (not on every request)
+        const clerkUser = await clerkClient.users.getUser(userId);
         const email =
           clerkUser.primaryEmailAddress?.emailAddress || "unknown@unknown.com";
         user = await storage.createUser({
-          id: auth.userId,
+          id: userId,
           email,
           displayName:
             clerkUser.fullName ||
