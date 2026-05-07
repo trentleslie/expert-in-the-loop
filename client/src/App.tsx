@@ -95,13 +95,23 @@ function ClerkSignUpPage() {
 function Router() {
   return (
     <Switch>
-      {/* Public routes */}
+      {/* Public routes — Clerk uses subpaths like /login/sso-callback */}
+      <Route path="/login/:rest*">
+        <PublicRoute>
+          <ClerkSignInPage />
+        </PublicRoute>
+      </Route>
       <Route path="/login">
         <PublicRoute>
           <ClerkSignInPage />
         </PublicRoute>
       </Route>
 
+      <Route path="/sign-up/:rest*">
+        <PublicRoute>
+          <ClerkSignUpPage />
+        </PublicRoute>
+      </Route>
       <Route path="/sign-up">
         <PublicRoute>
           <ClerkSignUpPage />
