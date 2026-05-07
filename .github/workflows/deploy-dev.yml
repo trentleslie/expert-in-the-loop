@@ -29,6 +29,8 @@ jobs:
           npm ci
           # NOTE: db:push removed from CI - run manually when schema changes
           # drizzle-kit push is interactive and hangs in non-TTY environments
+          # Source VITE_ env vars so Vite embeds them in the client build
+          set -a; source <(grep '^VITE_' .env 2>/dev/null); set +a
           npm run build
           sudo systemctl restart expert-in-the-loop-dev
           sleep 5
