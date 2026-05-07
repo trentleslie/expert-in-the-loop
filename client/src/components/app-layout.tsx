@@ -35,7 +35,6 @@ import {
   LayoutDashboard,
   Database,
   History,
-  Globe,
   PieChart,
 } from "lucide-react";
 
@@ -49,7 +48,6 @@ const adminMenuItems = [
   { title: "Dashboard", url: "/admin", icon: LayoutDashboard },
   { title: "Campaigns", url: "/admin/campaigns", icon: ClipboardList },
   { title: "Database", url: "/admin/database", icon: Database },
-  { title: "Domains", url: "/admin/domains", icon: Globe },
   { title: "Users", url: "/admin/users", icon: Users },
   { title: "Settings", url: "/admin/settings", icon: Settings },
 ];

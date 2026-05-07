@@ -1,5 +1,5 @@
-import { createContext, useContext, useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useUser, useAuth as useClerkAuth, useClerk } from "@clerk/react";
+import { useQuery } from "@tanstack/react-query";
 import type { User } from "@shared/schema";
 
 type AuthContextType = {
@@ -11,39 +11,32 @@ type AuthContextType = {
   refetch: () => void;
 };
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+export function useAuth(): AuthContextType {
+  const { isSignedIn, isLoaded: clerkLoaded } = useClerkAuth();
+  const { user: clerkUser, isLoaded: userLoaded } = useUser();
+  const { signOut } = useClerk();
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const queryClient = useQueryClient();
-  
-  const { data, isLoading, refetch } = useQuery<{ user: User } | null>({
+  // Fetch local user data (with role) from our API once Clerk is authenticated
+  const {
+    data,
+    isLoading: queryLoading,
+    refetch,
+  } = useQuery<{ user: User } | null>({
     queryKey: ["/api/auth/me"],
     retry: false,
-    staleTime: 1000 * 60 * 5, // 5 minutes
+    staleTime: 1000 * 60 * 5,
+    enabled: !!isSignedIn,
   });
 
+  const isLoading = !clerkLoaded || !userLoaded || (isSignedIn && queryLoading);
   const user = data?.user ?? null;
-  const isAuthenticated = !!user;
+  const isAuthenticated = !!isSignedIn && !!user;
   const isAdmin = user?.role === "admin";
 
   const logout = async () => {
-    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
-    queryClient.setQueryData(["/api/auth/me"], null);
-    queryClient.invalidateQueries();
-    window.location.href = "/";
+    await signOut();
+    window.location.href = "/login";
   };
 
-  return (
-    <AuthContext.Provider value={{ user, isLoading, isAuthenticated, isAdmin, logout, refetch }}>
-      {children}
-    </AuthContext.Provider>
-  );
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error("useAuth must be used within an AuthProvider");
-  }
-  return context;
+  return { user, isLoading, isAuthenticated, isAdmin, logout, refetch };
 }
