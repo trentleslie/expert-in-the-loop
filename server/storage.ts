@@ -15,7 +15,7 @@ import {
   type CampaignConfig,
   type EvidenceStatus,
 } from "@shared/campaignConfig";
-import { recomputeEvidenceStatusTx, withTransactionRetry } from "./evidenceStatus";
+import { recomputeEvidenceStatusTx, withTransactionRetry, recomputeAndPersistEvidenceStatus } from "./evidenceStatus";
 import { db } from "./db";
 import { eq, and, sql, desc, count, not, inArray, lt, gte, between } from "drizzle-orm";
 
@@ -37,6 +37,9 @@ export interface IStorage {
   getCampaignsWithStats(): Promise<CampaignWithStats[]>;
   createCampaign(campaign: InsertCampaign): Promise<Campaign>;
   updateCampaignStatus(id: string, status: Campaign["status"]): Promise<void>;
+  updateCampaignConfig(id: string, config: CampaignConfig): Promise<void>;
+  recomputeCampaignEvidenceStatus(campaignId: string): Promise<{ recomputed: number; status: "done" | "failed" }>;
+  reconcileStaleRecomputes(): Promise<void>;
   getDistinctCampaignTypes(): Promise<string[]>;
   
   // Pairs
@@ -321,6 +324,65 @@ export class DatabaseStorage implements IStorage {
 
   async updateCampaignStatus(id: string, status: Campaign["status"]): Promise<void> {
     await db.update(campaigns).set({ status }).where(eq(campaigns.id, id));
+  }
+
+  async updateCampaignConfig(id: string, config: CampaignConfig): Promise<void> {
+    await db.update(campaigns).set({ config }).where(eq(campaigns.id, id));
+  }
+
+  /**
+   * Bulk-recompute every pair's evidence status for a campaign under a freshly
+   * persisted config. Drives the recomputeStatus lifecycle: running -> done on
+   * success, running -> failed on error. Each pair recompute runs in its own
+   * retrying transaction (recomputeAndPersistEvidenceStatus), so one contended
+   * pair doesn't take down the whole batch.
+   */
+  async recomputeCampaignEvidenceStatus(
+    campaignId: string,
+  ): Promise<{ recomputed: number; status: "done" | "failed" }> {
+    await db
+      .update(campaigns)
+      .set({ recomputeStatus: "running" })
+      .where(eq(campaigns.id, campaignId));
+
+    try {
+      const config = await this.getCampaignConfig(campaignId);
+      const campaignPairs = await db
+        .select({ id: pairs.id })
+        .from(pairs)
+        .where(eq(pairs.campaignId, campaignId));
+
+      let recomputed = 0;
+      for (const { id } of campaignPairs) {
+        await recomputeAndPersistEvidenceStatus(id, config);
+        recomputed += 1;
+      }
+
+      await db
+        .update(campaigns)
+        .set({ recomputeStatus: "done" })
+        .where(eq(campaigns.id, campaignId));
+      return { recomputed, status: "done" };
+    } catch (err) {
+      console.error(`[storage] recomputeCampaignEvidenceStatus failed for ${campaignId}:`, err);
+      await db
+        .update(campaigns)
+        .set({ recomputeStatus: "failed" })
+        .where(eq(campaigns.id, campaignId));
+      throw err;
+    }
+  }
+
+  /**
+   * Startup recovery: any campaign left in 'running' was interrupted by a crash
+   * (the bulk recompute never reached its done/failed terminal write). Mark them
+   * 'failed' so the admin UI can offer a retry instead of a permanently stuck row.
+   */
+  async reconcileStaleRecomputes(): Promise<void> {
+    await db
+      .update(campaigns)
+      .set({ recomputeStatus: "failed" })
+      .where(eq(campaigns.recomputeStatus, "running"));
   }
 
   async getDistinctCampaignTypes(): Promise<string[]> {

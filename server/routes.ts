@@ -7,7 +7,7 @@ import { stringify } from "csv-stringify/sync";
 import { storage } from "./storage";
 import { requireAuth, requireAdmin } from "./auth";
 import { insertCampaignSchema, insertVoteSchema, type InsertPair } from "@shared/schema";
-import { RESOLUTION_LAYER_VALUES } from "@shared/campaignConfig";
+import { RESOLUTION_LAYER_VALUES, campaignConfigSchema } from "@shared/campaignConfig";
 import { z } from "zod";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -127,6 +127,41 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error updating campaign:", error);
       res.status(500).json({ message: "Failed to update campaign" });
+    }
+  });
+
+  // Update campaign config (admin only). Validates against the shared contract,
+  // persists, and — if the campaign already has votes — bulk-recomputes evidence
+  // status under the new config (consensus thresholds / scoring mode may change
+  // every pair's tier). Returns the recompute outcome so the UI can show
+  // running -> done/failed.
+  app.put("/api/campaigns/:id/config", requireAdmin, async (req, res) => {
+    try {
+      const campaign = await storage.getCampaign(req.params.id);
+      if (!campaign) {
+        return res.status(404).json({ message: "Campaign not found" });
+      }
+
+      const parsed = campaignConfigSchema.safeParse(req.body?.config);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid campaign config", errors: parsed.error.errors });
+      }
+
+      await storage.updateCampaignConfig(req.params.id, parsed.data);
+
+      // Only campaigns with existing votes need a recompute — a config edit on a
+      // not-yet-reviewed campaign just takes effect on future votes.
+      const progress = await storage.getCampaignProgress(req.params.id);
+      if (progress.reviewed > 0) {
+        const result = await storage.recomputeCampaignEvidenceStatus(req.params.id);
+        return res.json({ success: true, recomputed: result.recomputed, recomputeStatus: result.status });
+      }
+
+      return res.json({ success: true, recomputed: 0, recomputeStatus: "idle" });
+    } catch (error) {
+      console.error("Error updating campaign config:", error);
+      // recomputeCampaignEvidenceStatus already persisted recomputeStatus='failed'.
+      res.status(500).json({ message: "Failed to update campaign config", recomputeStatus: "failed" });
     }
   });
 
