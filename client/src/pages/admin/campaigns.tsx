@@ -58,7 +58,7 @@ import {
   AlertTriangle,
   CheckCircle2,
 } from "lucide-react";
-import type { CampaignWithStats } from "@shared/schema";
+import type { Campaign, CampaignWithStats } from "@shared/schema";
 import { CampaignConfigEditor } from "@/components/CampaignConfigEditor";
 import { DEFAULT_CAMPAIGN_CONFIG, campaignConfigSchema, type CampaignConfig } from "@shared/campaignConfig";
 import { useForm } from "react-hook-form";
@@ -433,7 +433,9 @@ function EditConfigDialog({
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   // Load the campaign's stored config (or the default) when the dialog opens.
-  const { data: fullCampaign } = useQuery<CampaignWithStats & { config: CampaignConfig | null }>({
+  // GET /api/campaigns/:id returns a base Campaign (which already carries
+  // config + recomputeStatus) — no need to widen to CampaignWithStats.
+  const { data: fullCampaign } = useQuery<Campaign>({
     queryKey: ["/api/campaigns", campaign.id],
     enabled: open,
   });
