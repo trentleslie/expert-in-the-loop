@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { getAuth, clerkClient } from "@clerk/express";
 import multer from "multer";
@@ -460,38 +460,62 @@ export async function registerRoutes(
 
   // ==================== PAIR/VOTE ROUTES ====================
 
-  // Submit vote for a pair
-  app.post("/api/pairs/:id/vote", requireAuth, async (req, res) => {
+  // Shared vote-cast handler. POST = first vote, PATCH = edit/correction; both
+  // create-or-supersede atomically (storage.castVote). No more 409-on-duplicate —
+  // a repeat vote supersedes the prior one. Reaching this with an existing vote
+  // only happens via the vote-history "edit" action (the review queue never
+  // re-serves a decided pair); supersession is therefore audit-only.
+  async function castVoteHandler(req: Request, res: Response) {
     try {
       const pairId = req.params.id;
-      const userId = getAuth(req).userId!;
+      const userId = getAuth(req).userId!; // server-authoritative — never trust the body
+
+      const pair = await storage.getPair(pairId);
+      if (!pair) return res.status(404).json({ message: "Pair not found" });
+
+      const campaign = await storage.getCampaign(pair.campaignId);
+      if (!campaign) return res.status(404).json({ message: "Campaign not found" });
+      if (campaign.status === "archived" || campaign.status === "completed") {
+        return res.status(403).json({ message: "Campaign is not open for voting" });
+      }
+
+      // Scoring mode is campaign-level — derive from config, don't trust req.body.
+      const config = await storage.getCampaignConfig(pair.campaignId);
+      const mode = config.scoring.mode;
+
+      // Reject votes whose shape mismatches the campaign's scoring mode.
+      if (mode === "binary" && (req.body.scoreBinary == null || req.body.scoreNumeric != null)) {
+        return res.status(400).json({ message: "This campaign uses binary scoring; provide scoreBinary only." });
+      }
+      if (mode === "numeric" && (req.body.scoreNumeric == null || req.body.scoreBinary != null)) {
+        return res.status(400).json({ message: "This campaign uses numeric scoring; provide scoreNumeric only." });
+      }
 
       const voteData = insertVoteSchema.parse({
         pairId,
         userId,
-        scoreBinary: req.body.scoreBinary,
-        scoreNumeric: req.body.scoreNumeric || null,
-        scoringMode: req.body.scoringMode || "binary",
-        // Expert selection and notes
-        expertSelectedCode: req.body.expertSelectedCode || null,
-        reviewerNotes: req.body.reviewerNotes || null,
+        scoreBinary: mode === "binary" ? req.body.scoreBinary : null,
+        scoreNumeric: mode === "numeric" ? req.body.scoreNumeric : null,
+        scoringMode: mode,
+        expertSelectedCode: req.body.expertSelectedCode ?? null,
+        reviewerNotes: req.body.reviewerNotes ?? null,
       });
 
-      const vote = await storage.createVote(voteData);
+      const { vote, evidenceStatus } = await storage.castVote(pairId, userId, voteData, config);
       await storage.updateUserLastActive(userId);
 
-      res.status(201).json(vote);
-    } catch (error: any) {
-      console.error("Error creating vote:", error);
-      if (error.code === "23505") {
-        return res.status(409).json({ message: "You have already voted on this pair" });
-      }
+      res.status(201).json({ ...vote, evidenceStatus });
+    } catch (error) {
+      console.error("Error casting vote:", error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid vote data", errors: error.errors });
       }
       res.status(500).json({ message: "Failed to submit vote" });
     }
-  });
+  }
+
+  // Submit vote for a pair
+  app.post("/api/pairs/:id/vote", requireAuth, castVoteHandler);
 
   // Skip a pair
   app.post("/api/pairs/:id/skip", requireAuth, async (req, res) => {
@@ -564,32 +588,9 @@ export async function registerRoutes(
     }
   });
 
-  // Update a vote (for corrections)
-  app.patch("/api/pairs/:id/vote", requireAuth, async (req, res) => {
-    try {
-      const pairId = req.params.id;
-      const userId = getAuth(req).userId!;
-      
-      const { scoreBinary, scoreNumeric, scoringMode, expertSelectedCode, reviewerNotes } = req.body;
-      
-      const updated = await storage.updateVote(pairId, userId, {
-        scoreBinary: scoreBinary !== undefined ? scoreBinary : undefined,
-        scoreNumeric: scoreNumeric !== undefined ? scoreNumeric : undefined,
-        scoringMode: scoringMode !== undefined ? scoringMode : undefined,
-        expertSelectedCode: expertSelectedCode !== undefined ? expertSelectedCode : undefined,
-        reviewerNotes: reviewerNotes !== undefined ? reviewerNotes : undefined,
-      });
-      
-      if (!updated) {
-        return res.status(404).json({ message: "Vote not found" });
-      }
-      
-      res.json(updated);
-    } catch (error) {
-      console.error("Error updating vote:", error);
-      res.status(500).json({ message: "Failed to update vote" });
-    }
-  });
+  // Edit a vote (correction from vote-history) — supersedes the prior vote via
+  // the same atomic create-or-supersede path as POST.
+  app.patch("/api/pairs/:id/vote", requireAuth, castVoteHandler);
 
   // ==================== ADMIN ROUTES ====================
 

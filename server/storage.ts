@@ -13,7 +13,9 @@ import {
   campaignConfigSchema,
   DEFAULT_CAMPAIGN_CONFIG,
   type CampaignConfig,
+  type EvidenceStatus,
 } from "@shared/campaignConfig";
+import { recomputeEvidenceStatusTx } from "./evidenceStatus";
 import { db } from "./db";
 import { eq, and, sql, desc, count, not, inArray, lt, gte, between } from "drizzle-orm";
 
@@ -47,10 +49,9 @@ export interface IStorage {
   getCampaignProgress(campaignId: string): Promise<{ reviewed: number; total: number }>;
   
   // Votes
-  createVote(vote: InsertVote): Promise<Vote>;
+  castVote(pairId: string, userId: string, voteData: Pick<InsertVote, "scoreBinary" | "scoreNumeric" | "scoringMode" | "expertSelectedCode" | "reviewerNotes">, config: CampaignConfig): Promise<{ vote: Vote; evidenceStatus: EvidenceStatus }>;
   getVotesByPair(pairId: string): Promise<Vote[]>;
   getUserVotes(userId: string): Promise<(Vote & { pair: Pair })[]>;
-  updateVote(pairId: string, userId: string, updates: Partial<Pick<Vote, "scoreBinary" | "scoreNumeric" | "scoringMode" | "expertSelectedCode" | "reviewerNotes">>): Promise<Vote | null>;
   getUserVotesCount(userId: string): Promise<number>;
   getUserVotesPerCampaign(userId: string): Promise<{ campaignId: string; campaignName: string; voteCount: number }[]>;
   getUserRecentActivity(userId: string, days: number): Promise<{ date: string; count: number }[]>;
@@ -253,7 +254,7 @@ export class DatabaseStorage implements IStorage {
         voteCount: sql<number>`COALESCE(COUNT(${votes.id}), 0)::int`,
       })
       .from(users)
-      .leftJoin(votes, eq(users.id, votes.userId))
+      .leftJoin(votes, and(eq(users.id, votes.userId), eq(votes.isActive, true)))
       .groupBy(users.id)
       .orderBy(desc(users.createdAt));
     
@@ -380,7 +381,7 @@ export class DatabaseStorage implements IStorage {
         voteCount: sql<number>`COALESCE(COUNT(${votes.id}), 0)::int`,
       })
       .from(pairs)
-      .leftJoin(votes, eq(pairs.id, votes.pairId))
+      .leftJoin(votes, and(eq(pairs.id, votes.pairId), eq(votes.isActive, true)))
       .where(
         and(
           eq(pairs.campaignId, campaignId),
@@ -422,7 +423,7 @@ export class DatabaseStorage implements IStorage {
       .select({ count: sql<number>`COUNT(DISTINCT ${pairs.id})::int` })
       .from(pairs)
       .innerJoin(votes, eq(pairs.id, votes.pairId))
-      .where(eq(pairs.campaignId, campaignId));
+      .where(and(eq(pairs.campaignId, campaignId), eq(votes.isActive, true)));
     return result?.count || 0;
   }
 
@@ -433,13 +434,58 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Votes
-  async createVote(vote: InsertVote): Promise<Vote> {
-    const [created] = await db.insert(votes).values(vote).returning();
-    return created;
+  /**
+   * Cast a vote: immutable create-or-supersede + evidence-status recompute, all
+   * in ONE transaction (atomic vote + status). This is the only write path for
+   * votes — it locks the pair row so concurrent casts serialize, and supersedes
+   * the reviewer's prior active vote rather than mutating it (the old row's
+   * content is preserved; only supersededBy/isActive flip).
+   */
+  async castVote(
+    pairId: string,
+    userId: string,
+    voteData: Pick<InsertVote, "scoreBinary" | "scoreNumeric" | "scoringMode" | "expertSelectedCode" | "reviewerNotes">,
+    config: CampaignConfig,
+  ): Promise<{ vote: Vote; evidenceStatus: EvidenceStatus }> {
+    return db.transaction(async (tx) => {
+      // Lock the pair row up front so concurrent casts on the same pair serialize.
+      await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+      await tx.execute(sql`SELECT 1 FROM ${pairs} WHERE ${pairs.id} = ${pairId} FOR UPDATE`);
+
+      // The reviewer's current active vote(s) on this pair (normally 0 or 1).
+      const existingActive = await tx
+        .select({ id: votes.id })
+        .from(votes)
+        .where(and(eq(votes.pairId, pairId), eq(votes.userId, userId), eq(votes.isActive, true)));
+
+      // Immutable write: always insert a new vote row.
+      const [created] = await tx
+        .insert(votes)
+        .values({ pairId, userId, ...voteData, isActive: true })
+        .returning();
+
+      // Supersede the prior active vote(s): content stays, flags flip.
+      if (existingActive.length > 0) {
+        await tx
+          .update(votes)
+          .set({ supersededBy: created.id, isActive: false, updatedAt: new Date() })
+          .where(inArray(votes.id, existingActive.map((v) => v.id)));
+      }
+
+      // Recompute + persist evidence status from the now-current active votes,
+      // within the same transaction (re-locks the already-held pair row).
+      const evidenceStatus = await recomputeEvidenceStatusTx(tx, pairId, config);
+      return { vote: created, evidenceStatus };
+    });
   }
 
   async getVotesByPair(pairId: string): Promise<Vote[]> {
-    return db.select().from(votes).where(eq(votes.pairId, pairId));
+    // Active votes only — superseded rows are history (see EXCEPTION lists for
+    // the chain-returning readers getUserVotes / getPairDetails).
+    return db
+      .select()
+      .from(votes)
+      .where(and(eq(votes.pairId, pairId), eq(votes.isActive, true)));
   }
 
   async getUserVotes(userId: string): Promise<(Vote & { pair: Pair })[]> {
@@ -456,24 +502,11 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
-  async updateVote(
-    pairId: string,
-    userId: string,
-    updates: Partial<Pick<Vote, "scoreBinary" | "scoreNumeric" | "scoringMode" | "expertSelectedCode" | "reviewerNotes">>
-  ): Promise<Vote | null> {
-    const [updated] = await db
-      .update(votes)
-      .set({ ...updates, updatedAt: new Date() })
-      .where(and(eq(votes.pairId, pairId), eq(votes.userId, userId)))
-      .returning();
-    return updated || null;
-  }
-
   async getUserVotesCount(userId: string): Promise<number> {
     const [result] = await db
       .select({ count: count() })
       .from(votes)
-      .where(eq(votes.userId, userId));
+      .where(and(eq(votes.userId, userId), eq(votes.isActive, true)));
     return result?.count || 0;
   }
 
@@ -487,7 +520,7 @@ export class DatabaseStorage implements IStorage {
       .from(votes)
       .innerJoin(pairs, eq(votes.pairId, pairs.id))
       .innerJoin(campaigns, eq(pairs.campaignId, campaigns.id))
-      .where(eq(votes.userId, userId))
+      .where(and(eq(votes.userId, userId), eq(votes.isActive, true)))
       .groupBy(campaigns.id, campaigns.name);
     
     return result;
@@ -503,7 +536,7 @@ export class DatabaseStorage implements IStorage {
         count: sql<number>`COUNT(*)::int`,
       })
       .from(votes)
-      .where(and(eq(votes.userId, userId), gte(votes.createdAt, startDate)))
+      .where(and(eq(votes.userId, userId), gte(votes.createdAt, startDate), eq(votes.isActive, true)))
       .groupBy(sql`DATE(${votes.createdAt})`)
       .orderBy(sql`DATE(${votes.createdAt})`);
     
@@ -518,7 +551,7 @@ export class DatabaseStorage implements IStorage {
         pairId: votes.pairId,
       })
       .from(votes)
-      .where(eq(votes.userId, userId));
+      .where(and(eq(votes.userId, userId), eq(votes.isActive, true)));
 
     if (userVotesWithConsensus.length === 0) return null;
 
@@ -530,7 +563,7 @@ export class DatabaseStorage implements IStorage {
       const pairVotes = await db
         .select({ scoreBinary: votes.scoreBinary })
         .from(votes)
-        .where(eq(votes.pairId, uv.pairId));
+        .where(and(eq(votes.pairId, uv.pairId), eq(votes.isActive, true)));
       
       if (pairVotes.length < 2) continue; // Need at least 2 votes to compare
       
@@ -604,7 +637,7 @@ export class DatabaseStorage implements IStorage {
   async getAdminStats() {
     const [userCount] = await db.select({ count: count() }).from(users);
     const [campaignCount] = await db.select({ count: count() }).from(campaigns);
-    const [voteCount] = await db.select({ count: count() }).from(votes);
+    const [voteCount] = await db.select({ count: count() }).from(votes).where(eq(votes.isActive, true));
     const [activeCount] = await db
       .select({ count: count() })
       .from(campaigns)
@@ -661,7 +694,7 @@ export class DatabaseStorage implements IStorage {
         skipCount: sql<number>`COALESCE(COUNT(DISTINCT ${skippedPairs.id}), 0)::int`,
       })
       .from(pairs)
-      .leftJoin(votes, eq(pairs.id, votes.pairId))
+      .leftJoin(votes, and(eq(pairs.id, votes.pairId), eq(votes.isActive, true)))
       .leftJoin(skippedPairs, eq(pairs.id, skippedPairs.pairId))
       .where(eq(pairs.campaignId, campaignId))
       .groupBy(pairs.id)
@@ -801,7 +834,7 @@ export class DatabaseStorage implements IStorage {
       })
       .from(votes)
       .innerJoin(pairs, eq(votes.pairId, pairs.id))
-      .where(eq(pairs.campaignId, campaignId));
+      .where(and(eq(pairs.campaignId, campaignId), eq(votes.isActive, true)));
 
     if (campaignVotes.length === 0) {
       return { alpha: null, raterCount: 0, pairCount: 0, voteCount: 0 };
@@ -923,7 +956,7 @@ export class DatabaseStorage implements IStorage {
         .select({ userId: votes.userId, pairId: votes.pairId, scoreBinary: votes.scoreBinary, scoringMode: votes.scoringMode, createdAt: votes.createdAt })
         .from(votes)
         .innerJoin(pairs, eq(votes.pairId, pairs.id))
-        .where(eq(pairs.campaignId, campaign.id));
+        .where(and(eq(pairs.campaignId, campaign.id), eq(votes.isActive, true)));
       
       const uniqueReviewers = new Set(campaignVotes.map(v => v.userId)).size;
       const reviewedPairs = new Set(campaignVotes.map(v => v.pairId)).size;
@@ -983,8 +1016,8 @@ export class DatabaseStorage implements IStorage {
       })
       .from(votes)
       .innerJoin(pairs, eq(votes.pairId, pairs.id))
-      .where(eq(pairs.campaignId, campaignId));
-    
+      .where(and(eq(pairs.campaignId, campaignId), eq(votes.isActive, true)));
+
     let binaryVotes = 0, numericVotes = 0, matchVotes = 0, noMatchVotes = 0;
     const numericScores: number[] = [];
     const dayMap = new Map<string, { binary: number; numeric: number }>();
@@ -1071,8 +1104,8 @@ export class DatabaseStorage implements IStorage {
       })
       .from(votes)
       .innerJoin(pairs, eq(votes.pairId, pairs.id))
-      .where(eq(pairs.campaignId, campaignId));
-    
+      .where(and(eq(pairs.campaignId, campaignId), eq(votes.isActive, true)));
+
     const usersData = await db.select().from(users);
     const userMap = new Map(usersData.map(u => [u.id, u]));
     
@@ -1196,8 +1229,8 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(votes)
       .innerJoin(pairs, eq(votes.pairId, pairs.id))
-      .where(eq(pairs.campaignId, campaignId));
-    
+      .where(and(eq(pairs.campaignId, campaignId), eq(votes.isActive, true)));
+
     const pairStats = new Map<string, {
       positiveVotes: number;
       negativeVotes: number;
@@ -1317,8 +1350,8 @@ export class DatabaseStorage implements IStorage {
       .select({ pairId: votes.pairId, userId: votes.userId, id: votes.id })
       .from(votes)
       .innerJoin(pairs, eq(votes.pairId, pairs.id))
-      .where(eq(pairs.campaignId, campaignId));
-    
+      .where(and(eq(pairs.campaignId, campaignId), eq(votes.isActive, true)));
+
     const usersData = await db.select().from(users);
     const userMap = new Map(usersData.map(u => [u.id, u]));
     
@@ -1388,11 +1421,12 @@ export class DatabaseStorage implements IStorage {
         .select({ createdAt: votes.createdAt })
         .from(votes)
         .innerJoin(pairs, eq(votes.pairId, pairs.id))
-        .where(eq(pairs.campaignId, campaignId));
+        .where(and(eq(pairs.campaignId, campaignId), eq(votes.isActive, true)));
     } else {
       allVotes = await db
         .select({ createdAt: votes.createdAt })
-        .from(votes);
+        .from(votes)
+        .where(eq(votes.isActive, true));
     }
     
     const dayMap = new Map<string, number>();

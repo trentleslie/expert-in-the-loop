@@ -12,13 +12,6 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
@@ -56,11 +49,14 @@ function VoteCard({
   const isLoinc = vote.pair.targetDataset?.toUpperCase() === "LOINC";
 
   return (
-    <Card className="border-card-border" data-testid={`card-vote-${vote.id}`}>
+    <Card
+      className={`border-card-border ${vote.isActive ? "" : "opacity-60"}`}
+      data-testid={`card-vote-${vote.id}`}
+    >
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
               {vote.scoringMode === "binary" ? (
                 vote.scoreBinary === "match" ? (
                   <Badge className="bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20">
@@ -86,10 +82,10 @@ function VoteCard({
               <span className="text-xs text-muted-foreground">
                 {formatDate(vote.createdAt)}
               </span>
-              {vote.updatedAt && new Date(vote.updatedAt).getTime() > new Date(vote.createdAt).getTime() + 1000 && (
-                <span className="text-xs text-muted-foreground italic">
-                  (edited)
-                </span>
+              {!vote.isActive && (
+                <Badge variant="outline" className="text-xs text-muted-foreground">
+                  Superseded
+                </Badge>
               )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
@@ -133,14 +129,16 @@ function VoteCard({
               </p>
             )}
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onEdit(vote)}
-            data-testid={`button-edit-vote-${vote.id}`}
-          >
-            <Edit className="w-4 h-4" />
-          </Button>
+          {vote.isActive && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onEdit(vote)}
+              data-testid={`button-edit-vote-${vote.id}`}
+            >
+              <Edit className="w-4 h-4" />
+            </Button>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -192,16 +190,17 @@ function EditVoteDialog({
     onSuccess: () => {
       toast({
         title: "Vote updated",
-        description: "Your vote has been successfully updated.",
+        description: "Your previous vote was superseded with this correction.",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/users/me/votes"] });
       queryClient.invalidateQueries({ queryKey: ["/api/users/me/stats"] });
       onClose();
     },
-    onError: () => {
+    onError: (error: Error) => {
+      // Surface the server message (e.g. 403 archived campaign, 400 mode mismatch).
       toast({
         title: "Error",
-        description: "Failed to update vote. Please try again.",
+        description: error?.message || "Failed to update vote. Please try again.",
         variant: "destructive",
       });
     },
@@ -229,22 +228,7 @@ function EditVoteDialog({
             </p>
           </div>
 
-          <div className="space-y-2">
-            <Label>Scoring Mode</Label>
-            <Select
-              value={scoringMode}
-              onValueChange={(v) => setScoringMode(v as "binary" | "numeric")}
-            >
-              <SelectTrigger data-testid="select-scoring-mode">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="binary">Binary (Yes/No)</SelectItem>
-                <SelectItem value="numeric">Numeric (1-5)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
+          {/* Scoring mode is fixed by the campaign — edits keep the original mode. */}
           {scoringMode === "binary" ? (
             <div className="space-y-2">
               <Label>Your Vote</Label>
