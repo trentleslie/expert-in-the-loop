@@ -80,14 +80,31 @@ const numericScoringSchema = z.object({
 
 export const campaignConfigSchema = z.object({
   scoring: z.discriminatedUnion("mode", [binaryScoringSchema, numericScoringSchema]),
-  consensus: z.object({
-    minVotes: z.number().int().min(1).default(2),
-    confirmPct: z.number().min(0).max(100).default(70),
-    rejectPct: z.number().min(0).max(100).default(70),
-    // Required when scoring.mode === "numeric"; validated at the call site.
-    numericConfirmThreshold: z.number().optional(),
-    numericRejectThreshold: z.number().optional(),
-  }),
+  consensus: z
+    .object({
+      minVotes: z.number().int().min(1).default(2),
+      confirmPct: z.number().min(0).max(100).default(70),
+      rejectPct: z.number().min(0).max(100).default(70),
+      // Required when scoring.mode === "numeric"; validated at the call site.
+      numericConfirmThreshold: z.number().optional(),
+      numericRejectThreshold: z.number().optional(),
+    })
+    .superRefine((c, ctx) => {
+      // Inverted numeric thresholds make `disputed` unreachable (the confirm
+      // check runs first), silently turning every borderline pair into
+      // expert_confirmed. Reject at write time.
+      if (
+        c.numericConfirmThreshold != null &&
+        c.numericRejectThreshold != null &&
+        c.numericConfirmThreshold <= c.numericRejectThreshold
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "numericConfirmThreshold must be greater than numericRejectThreshold",
+          path: ["numericConfirmThreshold"],
+        });
+      }
+    }),
   display: z.object({
     showExternalLinks: z.boolean().default(false),
     linkTemplate: linkTemplateSchema.optional(),

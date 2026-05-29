@@ -66,7 +66,10 @@ export function computeEvidenceStatus(
     }
     const scores = activeVotes
       .map((v) => v.scoreNumeric)
-      .filter((n): n is number => n != null);
+      // Exclude NaN explicitly: it passes `!= null` but poisons the mean (all
+      // NaN comparisons are false), which would silently return "disputed"
+      // instead of routing through the observable fallback below.
+      .filter((n): n is number => n != null && !Number.isNaN(n));
     if (scores.length === 0) {
       throw new Error("numeric scoring computed over zero numeric scores");
     }
@@ -114,6 +117,12 @@ export async function recomputeEvidenceStatusTx(
 
 const SERIALIZATION_FAILURE = "40001";
 const DEADLOCK_DETECTED = "40P01";
+const LOCK_NOT_AVAILABLE = "55P03"; // raised by SET LOCAL lock_timeout on contention
+const RETRYABLE_CODES = new Set([
+  SERIALIZATION_FAILURE,
+  DEADLOCK_DETECTED,
+  LOCK_NOT_AVAILABLE,
+]);
 
 /**
  * Standalone recompute (its own transaction). Used by the bulk recompute path
@@ -135,10 +144,7 @@ export async function recomputeAndPersistEvidenceStatus(
       });
     } catch (err) {
       const code = (err as { code?: string })?.code;
-      if (
-        (code === SERIALIZATION_FAILURE || code === DEADLOCK_DETECTED) &&
-        attempt < maxRetries
-      ) {
+      if (code != null && RETRYABLE_CODES.has(code) && attempt < maxRetries) {
         attempt += 1;
         continue;
       }

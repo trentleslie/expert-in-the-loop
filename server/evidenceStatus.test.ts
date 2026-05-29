@@ -127,7 +127,14 @@ describe("computeEvidenceStatus — observable fallback", () => {
     expect(evidenceStatusMetrics.fallbacks).toBe(1);
   });
 
-  it("does not throw on malformed input", () => {
-    expect(() => computeEvidenceStatus(numericConfig(), [num(NaN)])).not.toThrow();
+  it("NaN scores trigger the observable fallback, not a silent disputed", () => {
+    // Enough votes to pass the minVotes gate so we actually reach the numeric
+    // path; both scores are NaN, so the filtered set is empty -> fallback fires.
+    const result = computeEvidenceStatus(numericConfig({ minVotes: 2 }), [
+      num(NaN),
+      num(NaN),
+    ]);
+    expect(result).toBe("in_review");
+    expect(evidenceStatusMetrics.fallbacks).toBe(1);
   });
 });
