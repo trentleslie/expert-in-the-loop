@@ -345,6 +345,15 @@ export async function registerRoutes(
       const campaignId = req.params.id;
       const userId = getAuth(req).userId!;
 
+      // Archived/completed campaigns are not open for voting (clean-slate
+      // isolation). storage.getNextPairForUser also guards, but return an
+      // explicit signal rather than a silent empty queue.
+      const campaign = await storage.getCampaign(campaignId);
+      if (!campaign) return res.status(404).json({ message: "Campaign not found" });
+      if (campaign.status === "archived" || campaign.status === "completed") {
+        return res.status(403).json({ message: "Campaign is not open for voting" });
+      }
+
       const pair = await storage.getNextPairForUser(campaignId, userId);
       const progress = await storage.getCampaignProgress(campaignId);
 

@@ -9,6 +9,11 @@ import {
   type ImportTemplate, type InsertImportTemplate,
   type CampaignWithStats, type UserStats
 } from "@shared/schema";
+import {
+  campaignConfigSchema,
+  DEFAULT_CAMPAIGN_CONFIG,
+  type CampaignConfig,
+} from "@shared/campaignConfig";
 import { db } from "./db";
 import { eq, and, sql, desc, count, not, inArray, lt, gte, between } from "drizzle-orm";
 
@@ -25,6 +30,7 @@ export interface IStorage {
   
   // Campaigns
   getCampaign(id: string): Promise<Campaign | undefined>;
+  getCampaignConfig(campaignId: string): Promise<CampaignConfig>;
   getAllCampaigns(): Promise<CampaignWithStats[]>;
   getCampaignsWithStats(): Promise<CampaignWithStats[]>;
   createCampaign(campaign: InsertCampaign): Promise<Campaign>;
@@ -264,6 +270,29 @@ export class DatabaseStorage implements IStorage {
     return campaign || undefined;
   }
 
+  /**
+   * Resolve a campaign's effective config. Reads the stored JSONB and validates
+   * it; falls back to DEFAULT_CAMPAIGN_CONFIG when the column is null (archived /
+   * pre-cutover campaigns) or fails validation. Always returns a usable config so
+   * the vote/consensus path never has to handle a missing/invalid one.
+   */
+  async getCampaignConfig(campaignId: string): Promise<CampaignConfig> {
+    const [campaign] = await db
+      .select({ config: campaigns.config })
+      .from(campaigns)
+      .where(eq(campaigns.id, campaignId));
+    if (!campaign?.config) return DEFAULT_CAMPAIGN_CONFIG;
+    const parsed = campaignConfigSchema.safeParse(campaign.config);
+    if (!parsed.success) {
+      console.error(
+        `[storage] invalid campaign config for ${campaignId}; using DEFAULT_CAMPAIGN_CONFIG:`,
+        parsed.error.issues,
+      );
+      return DEFAULT_CAMPAIGN_CONFIG;
+    }
+    return parsed.data;
+  }
+
   async getAllCampaigns(): Promise<CampaignWithStats[]> {
     return this.getCampaignsWithStats();
   }
@@ -320,7 +349,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getNextPairForUser(campaignId: string, userId: string): Promise<Pair | null> {
-    // Get IDs of pairs user has already voted on or skipped
+    // Archived/completed campaigns are read-only relics — never serve their pairs
+    // for voting. This is the real isolation boundary (clean-slate cutover), not
+    // just a client-side list filter.
+    const campaign = await this.getCampaign(campaignId);
+    if (!campaign || campaign.status === "archived" || campaign.status === "completed") {
+      return null;
+    }
+
+    // Get IDs of pairs user has already voted on or skipped.
+    // NOTE: this exclusion intentionally checks ANY vote (active OR superseded) —
+    // a reviewer who superseded their vote must not be re-served the pair
+    // (Unit 4 EXCEPTION 1). Do NOT add an isActive filter here.
     const userVotes = await db
       .select({ pairId: votes.pairId })
       .from(votes)
@@ -338,13 +378,6 @@ export class DatabaseStorage implements IStorage {
       .select({
         pair: pairs,
         voteCount: sql<number>`COALESCE(COUNT(${votes.id}), 0)::int`,
-        positiveRate: sql<number>`
-          CASE 
-            WHEN COUNT(${votes.id}) > 0 
-            THEN AVG(CASE WHEN ${votes.scoreBinary} = 'match' THEN 1.0 WHEN ${votes.scoreBinary} = 'no_match' THEN 0.0 ELSE NULL END)
-            ELSE NULL 
-          END
-        `,
       })
       .from(pairs)
       .leftJoin(votes, eq(pairs.id, votes.pairId))
@@ -357,11 +390,10 @@ export class DatabaseStorage implements IStorage {
       .groupBy(pairs.id)
       .orderBy(
         sql`
-          CASE 
+          CASE
             WHEN COUNT(${votes.id}) = 0 THEN 0
             WHEN ${pairs.llmConfidence} < 0.7 AND COUNT(${votes.id}) < 3 THEN 1
-            WHEN COUNT(${votes.id}) > 0 AND 
-                 AVG(CASE WHEN ${votes.scoreBinary} = 'match' THEN 1.0 WHEN ${votes.scoreBinary} = 'no_match' THEN 0.0 ELSE NULL END) BETWEEN 0.4 AND 0.6 THEN 2
+            WHEN ${pairs.evidenceStatus} = 'disputed' THEN 2
             ELSE 3
           END,
           COUNT(${votes.id}),
@@ -657,13 +689,15 @@ export class DatabaseStorage implements IStorage {
       );
     }
 
-    // Consensus filter
+    // Consensus filter — read the stored evidenceStatus (R12), not a recomputed
+    // threshold. The engine (server/evidenceStatus.ts) owns the threshold math.
     if (consensus) {
       filteredPairs = filteredPairs.filter(row => {
-        if (consensus === "unreviewed") return row.voteCount === 0;
-        if (consensus === "match") return row.positiveRate !== null && row.positiveRate > 0.6;
-        if (consensus === "no_match") return row.positiveRate !== null && row.positiveRate < 0.4;
-        if (consensus === "disagreement") return row.positiveRate !== null && row.positiveRate >= 0.4 && row.positiveRate <= 0.6;
+        const status = row.pair.evidenceStatus;
+        if (consensus === "unreviewed") return status === "unreviewed";
+        if (consensus === "match") return status === "expert_confirmed";
+        if (consensus === "no_match") return status === "expert_rejected";
+        if (consensus === "disagreement") return status === "disputed";
         return true;
       });
     }
@@ -895,28 +929,13 @@ export class DatabaseStorage implements IStorage {
       const reviewedPairs = new Set(campaignVotes.map(v => v.pairId)).size;
       const avgVotesPerPair = reviewedPairs > 0 ? Math.round((campaignVotes.length / reviewedPairs) * 10) / 10 : 0;
       
-      const pairVoteCounts = new Map<string, { positive: number; negative: number }>();
-      campaignVotes.forEach(v => {
-        if (v.scoringMode !== "binary") return;
-        if (!pairVoteCounts.has(v.pairId)) {
-          pairVoteCounts.set(v.pairId, { positive: 0, negative: 0 });
-        }
-        const counts = pairVoteCounts.get(v.pairId)!;
-        if (v.scoreBinary === "match") counts.positive++;
-        else if (v.scoreBinary === "no_match") counts.negative++;
-        // Note: "unsure" votes are not counted as positive or negative
-      });
-      
-      let disagreementCount = 0;
-      pairVoteCounts.forEach(counts => {
-        const total = counts.positive + counts.negative;
-        if (total >= 2) {
-          const positiveRate = counts.positive / total;
-          if (positiveRate >= 0.4 && positiveRate <= 0.6) {
-            disagreementCount++;
-          }
-        }
-      });
+      // R12: disagreement = pairs whose stored evidenceStatus is 'disputed'
+      // (engine-computed, covers binary and numeric). No threshold recompute here.
+      const [disputed] = await db
+        .select({ count: sql<number>`COUNT(*)::int` })
+        .from(pairs)
+        .where(and(eq(pairs.campaignId, campaign.id), eq(pairs.evidenceStatus, "disputed")));
+      const disagreementCount = disputed?.count ?? 0;
       
       const alpha = await this.calculateKrippendorffAlpha(campaign.id);
       
@@ -1202,13 +1221,11 @@ export class DatabaseStorage implements IStorage {
     for (const [pairId, stats] of Array.from(pairStats.entries())) {
       const pair = pairMap.get(pairId);
       if (!pair) continue;
-      
+      // R12: "high disagreement" = stored evidenceStatus 'disputed' (engine-computed).
+      if (pair.evidenceStatus !== "disputed") continue;
+
       const voteCount = stats.positiveVotes + stats.negativeVotes;
-      if (voteCount < 2) continue;
-      
-      const positiveRate = Math.round((stats.positiveVotes / voteCount) * 100);
-      
-      if (positiveRate < 40 || positiveRate > 60) continue;
+      const positiveRate = voteCount > 0 ? Math.round((stats.positiveVotes / voteCount) * 100) : 0;
       
       let numericMean: number | null = null;
       let numericStdDev: number | null = null;
@@ -1242,24 +1259,7 @@ export class DatabaseStorage implements IStorage {
     disagreementRate: number;
   }[]> {
     const campaignPairs = await db.select().from(pairs).where(eq(pairs.campaignId, campaignId));
-    
-    const allVotes = await db
-      .select()
-      .from(votes)
-      .innerJoin(pairs, eq(votes.pairId, pairs.id))
-      .where(eq(pairs.campaignId, campaignId));
-    
-    const pairVoteCounts = new Map<string, { positive: number; negative: number }>();
-    allVotes.forEach(({ votes: v }) => {
-      if (!pairVoteCounts.has(v.pairId)) {
-        pairVoteCounts.set(v.pairId, { positive: 0, negative: 0 });
-      }
-      const counts = pairVoteCounts.get(v.pairId)!;
-      if (v.scoreBinary === "match") counts.positive++;
-      else if (v.scoreBinary === "no_match") counts.negative++;
-      // "unsure" counts toward neither positive nor negative
-    });
-    
+
     const buckets = [
       { name: "0.9-1.0", min: 0.9, max: 1.0 },
       { name: "0.8-0.9", min: 0.8, max: 0.9 },
@@ -1274,17 +1274,8 @@ export class DatabaseStorage implements IStorage {
         return conf >= bucket.min && conf < bucket.max;
       });
       
-      let disagreementCount = 0;
-      pairsInBucket.forEach(p => {
-        const counts = pairVoteCounts.get(p.id);
-        if (counts) {
-          const total = counts.positive + counts.negative;
-          if (total >= 2) {
-            const rate = counts.positive / total;
-            if (rate >= 0.4 && rate <= 0.6) disagreementCount++;
-          }
-        }
-      });
+      // R12: disagreement = stored evidenceStatus 'disputed' (engine-computed).
+      const disagreementCount = pairsInBucket.filter(p => p.evidenceStatus === "disputed").length;
       
       return {
         bucket: bucket.name,
