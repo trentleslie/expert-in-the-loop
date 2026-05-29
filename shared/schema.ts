@@ -1,12 +1,14 @@
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, uuid, boolean, integer, real, jsonb, pgEnum, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, uuid, boolean, integer, real, jsonb, pgEnum, unique, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import { campaignConfigSchema, type CampaignConfig, type EvidenceStatus } from "./campaignConfig";
 
 // Enums
 export const userRoleEnum = pgEnum("user_role", ["reviewer", "admin"]);
 export const campaignStatusEnum = pgEnum("campaign_status", ["draft", "active", "completed", "archived"]);
-export const pairTypeEnum = pgEnum("pair_type", ["questionnaire_match", "loinc_mapping"]);
+// NOTE: pairType is now free-text (the pair_type pgEnum was dropped in
+// migration-001). scoring_mode stays an enum (multi_criteria deferred — #5).
 export const scoringModeEnum = pgEnum("scoring_mode", ["binary", "numeric"]);
 export const binaryScoreEnum = pgEnum("binary_score", ["match", "no_match", "unsure"]);
 
@@ -33,6 +35,14 @@ export const campaigns = pgTable("campaigns", {
   campaignType: text("campaign_type").notNull(),
   // Reviewer instructions shown on the review page
   instructions: text("instructions"),
+  // Per-campaign configuration (scoring, consensus, display, import). Nullable:
+  // getCampaignConfig() falls back to DEFAULT_CAMPAIGN_CONFIG when null. New
+  // campaigns are created with an explicit config at the application layer; a
+  // JS-object constant is NOT a SQL default, so db:push leaves existing rows null.
+  config: jsonb("config").$type<CampaignConfig>(),
+  // Bulk evidence-status recompute lifecycle (admin config edits). A stale
+  // 'running' on startup is reconciled to 'failed' and offered for retry.
+  recomputeStatus: text("recompute_status").notNull().default("idle"),
   createdBy: varchar("created_by", { length: 255 }).references(() => users.id).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   status: campaignStatusEnum("status").notNull().default("draft"),
@@ -50,8 +60,13 @@ export const campaignsRelations = relations(campaigns, ({ one, many }) => ({
 export const pairs = pgTable("pairs", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   campaignId: uuid("campaign_id").references(() => campaigns.id).notNull(),
-  pairType: pairTypeEnum("pair_type").notNull(),
-  
+  // Free-text (was the pair_type enum; generalized in migration-001).
+  pairType: text("pair_type").notNull(),
+  // Evidence tier — recomputed from active votes on every vote/supersession.
+  evidenceStatus: text("evidence_status").notNull().default("unreviewed"),
+  // Provenance of how this pair was produced (validated against RESOLUTION_LAYER_VALUES).
+  resolutionLayer: text("resolution_layer").notNull().default("unspecified"),
+
   // Source item
   sourceText: text("source_text").notNull(),
   sourceDataset: text("source_dataset").notNull(),
@@ -92,11 +107,16 @@ export const votes = pgTable("votes", {
   expertSelectedCode: text("expert_selected_code"),
   // Reviewer notes/reasoning for their decision
   reviewerNotes: text("reviewer_notes"),
+  // Vote supersession chain: when a reviewer edits a prior vote, a new row is
+  // inserted and the old row's supersededBy points to it with isActive=false.
+  // Vote *content* is immutable; only these two flags are mutated on the old row.
+  supersededBy: uuid("superseded_by").references((): AnyPgColumn => votes.id),
+  isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").$onUpdate(() => new Date()),
-}, (table) => ({
-  uniqueUserPair: unique().on(table.pairId, table.userId),
-}));
+});
+// NOTE: the (pairId, userId) UNIQUE constraint was dropped in migration-001 to
+// allow multiple vote rows per reviewer/pair (supersession chain). Do not re-add it.
 
 export const votesRelations = relations(votes, ({ one }) => ({
   pair: one(pairs, {
@@ -156,9 +176,14 @@ export const insertUserSchema = createInsertSchema(users).omit({
   lastActive: true,
 });
 
-export const insertCampaignSchema = createInsertSchema(campaigns).omit({
+export const insertCampaignSchema = createInsertSchema(campaigns, {
+  // Use the real config contract (drizzle-zod widens jsonb $type to a loose
+  // shape, dropping the discriminated-union literal on scoring.mode).
+  config: campaignConfigSchema.nullish(),
+}).omit({
   id: true,
   createdAt: true,
+  recomputeStatus: true, // server-managed lifecycle field
 });
 
 export const insertPairSchema = createInsertSchema(pairs).omit({
@@ -170,6 +195,8 @@ export const insertVoteSchema = createInsertSchema(votes).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+  supersededBy: true, // server-managed supersession chain
+  isActive: true,
 });
 
 export const insertAllowedDomainSchema = createInsertSchema(allowedDomains).omit({
@@ -213,11 +240,17 @@ export type CampaignWithStats = Campaign & {
   totalPairs: number;
   reviewedPairs: number;
   creator?: User;
+  // Evidence-tier breakdown for progress reporting (R12). Optional so callers
+  // that don't compute it stay valid.
+  evidenceTiers?: Record<EvidenceStatus, number>;
 };
 
 export type PairWithVotes = Pair & {
   voteCount: number;
   positiveRate: number | null;
+  // Count of active (non-superseded) votes vs total rows in the chain.
+  activeVoteCount?: number;
+  totalVoteCount?: number;
 };
 
 export type UserStats = {
