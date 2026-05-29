@@ -304,14 +304,35 @@ export class DatabaseStorage implements IStorage {
 
   async getCampaignsWithStats(): Promise<CampaignWithStats[]> {
     const campaignList = await db.select().from(campaigns).orderBy(desc(campaigns.createdAt));
-    
+
     const result: CampaignWithStats[] = [];
     for (const campaign of campaignList) {
       const progress = await this.getCampaignProgress(campaign.id);
+
+      // Evidence-tier breakdown (R12) for progress reporting on the home page.
+      const tierRows = await db
+        .select({ status: pairs.evidenceStatus, c: count() })
+        .from(pairs)
+        .where(eq(pairs.campaignId, campaign.id))
+        .groupBy(pairs.evidenceStatus);
+      const evidenceTiers: Record<EvidenceStatus, number> = {
+        unreviewed: 0,
+        in_review: 0,
+        expert_confirmed: 0,
+        expert_rejected: 0,
+        disputed: 0,
+      };
+      for (const r of tierRows) {
+        if (r.status in evidenceTiers) {
+          evidenceTiers[r.status as EvidenceStatus] = r.c;
+        }
+      }
+
       result.push({
         ...campaign,
         totalPairs: progress.total,
         reviewedPairs: progress.reviewed,
+        evidenceTiers,
       });
     }
     return result;
