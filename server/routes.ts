@@ -7,6 +7,7 @@ import { stringify } from "csv-stringify/sync";
 import { storage } from "./storage";
 import { requireAuth, requireAdmin } from "./auth";
 import { insertCampaignSchema, insertVoteSchema, type InsertPair } from "@shared/schema";
+import { RESOLUTION_LAYER_VALUES } from "@shared/campaignConfig";
 import { z } from "zod";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -152,8 +153,8 @@ export async function registerRoutes(
           return res.status(400).json({ message: "Request body must contain a non-empty 'pairs' array" });
         }
 
-        // Validate each pair has the required fields
-        const validPairTypes = ["questionnaire_match", "loinc_mapping"];
+        // Validate each pair has the required fields. pairType is now free-text
+        // (defaults to the campaign type) — no fixed allowlist.
         const invalidPairs: number[] = [];
 
         pairsData = rawPairs.map((p: any, idx: number) => {
@@ -165,13 +166,14 @@ export async function registerRoutes(
           const targetDataset = p.target_dataset || p.targetDataset;
           const targetId = p.target_id || p.targetId;
 
-          if (!sourceText || !sourceId || !targetText || !targetId || !validPairTypes.includes(pairType)) {
+          if (!sourceText || !sourceId || !targetText || !targetId) {
             invalidPairs.push(idx);
           }
 
           return {
             campaignId,
-            pairType: pairType as "questionnaire_match" | "loinc_mapping",
+            pairType,
+            resolutionLayer: p.resolution_layer || p.resolutionLayer || "unspecified",
             sourceText: sourceText || "",
             sourceDataset: sourceDataset || "Unknown",
             sourceId: sourceId || "",
@@ -190,7 +192,7 @@ export async function registerRoutes(
 
         if (invalidPairs.length > 0) {
           return res.status(400).json({
-            message: `${invalidPairs.length} pair(s) are missing required fields (sourceText, sourceId, targetText, targetId) or have an invalid pairType. Valid types: ${validPairTypes.join(", ")}`,
+            message: `${invalidPairs.length} pair(s) are missing required fields (sourceText, sourceId, targetText, targetId).`,
             invalidIndices: invalidPairs,
           });
         }
@@ -210,6 +212,7 @@ export async function registerRoutes(
           pairsData = rawPairs.map((p: any) => ({
             campaignId,
             pairType: p.pair_type || p.pairType || campaign.campaignType,
+            resolutionLayer: p.resolution_layer || p.resolutionLayer || "unspecified",
             sourceText: p.source_text || p.sourceText,
             sourceDataset: p.source_dataset || p.sourceDataset,
             sourceId: p.source_id || p.sourceId,
@@ -230,34 +233,40 @@ export async function registerRoutes(
             trim: true,
           });
 
-          pairsData = records.map((row: any) => {
-            // Build metadata from extra columns
-            const sourceMetadata: Record<string, unknown> = {};
-            const targetMetadata: Record<string, unknown> = {};
+          // Standard field columns are mapped explicitly; ALL other columns are
+          // preserved verbatim in sourceMetadata (no LOINC-specific fallbacks or
+          // hardcoded metadata keys). For precise source/target metadata splits,
+          // use the column-mapping wizard (JSON path above). Stored as raw
+          // strings — downstream renders them text-only (never as HTML).
+          const STANDARD_COLS = new Set([
+            "source_text", "source_dataset", "source_id", "source_metadata",
+            "target_text", "target_dataset", "target_id", "target_metadata",
+            "pair_type", "resolution_layer", "llm_confidence", "confidence_score",
+            "llm_model", "llm_reasoning",
+          ]);
 
-            if (row.category) sourceMetadata.category = row.category;
-            if (row.units) sourceMetadata.units = row.units;
-            if (row.data_type) sourceMetadata.data_type = row.data_type;
-            if (row.query_source) sourceMetadata.query_source = row.query_source;
-            if (row.num_queries) sourceMetadata.num_queries = row.num_queries;
-            if (row.top_5_loinc) targetMetadata.top_5_loinc = row.top_5_loinc;
+          pairsData = records.map((row: any) => {
+            const extraMetadata: Record<string, unknown> = {};
+            for (const [key, value] of Object.entries(row)) {
+              if (!STANDARD_COLS.has(key) && value !== "" && value != null) {
+                extraMetadata[key] = value;
+              }
+            }
 
             return {
               campaignId,
               pairType: row.pair_type || campaign.campaignType,
-              // Support both standard names and Arivale/LOINC format
-              sourceText: row.source_text || row.description,
-              sourceDataset: row.source_dataset || row.cohort || "Unknown",
-              sourceId: row.source_id || row.field_name,
+              resolutionLayer: row.resolution_layer || "unspecified",
+              sourceText: row.source_text,
+              sourceDataset: row.source_dataset || "Unknown",
+              sourceId: row.source_id,
               sourceMetadata: row.source_metadata
                 ? JSON.parse(row.source_metadata)
-                : (Object.keys(sourceMetadata).length > 0 ? sourceMetadata : null),
-              targetText: row.target_text || row.loinc_name,
-              targetDataset: row.target_dataset || (row.loinc_code ? "LOINC" : "Unknown"),
-              targetId: row.target_id || row.loinc_code,
-              targetMetadata: row.target_metadata
-                ? JSON.parse(row.target_metadata)
-                : (Object.keys(targetMetadata).length > 0 ? targetMetadata : null),
+                : (Object.keys(extraMetadata).length > 0 ? extraMetadata : null),
+              targetText: row.target_text,
+              targetDataset: row.target_dataset || "Unknown",
+              targetId: row.target_id,
+              targetMetadata: row.target_metadata ? JSON.parse(row.target_metadata) : null,
               llmConfidence: row.llm_confidence
                 ? parseFloat(row.llm_confidence)
                 : (row.confidence_score ? parseFloat(row.confidence_score) : null),
@@ -268,26 +277,39 @@ export async function registerRoutes(
         }
       }
 
-      // ── Same-source pair detection ───────────────────────────────────────
-      // Helper function to extract source prefix from question ID
-      const getSourcePrefix = (id: string): string => {
-        if (id.startsWith("arivale_")) return "arivale";
-        if (id.startsWith("il10k_")) return "il10k";
-        if (id.startsWith("ukbb_")) return "ukbb";
-        return "unknown";
-      };
+      // ── Provenance validation ────────────────────────────────────────────
+      // resolutionLayer flows to downstream exports — reject unknown values
+      // rather than silently mislabeling provenance.
+      const invalidLayers = pairsData
+        .map((p, i) => ({ i, rl: p.resolutionLayer }))
+        .filter((x) => x.rl != null && !(RESOLUTION_LAYER_VALUES as readonly string[]).includes(x.rl));
+      if (invalidLayers.length > 0) {
+        return res.status(400).json({
+          message: `Invalid resolution_layer value(s). Allowed: ${RESOLUTION_LAYER_VALUES.join(", ")}.`,
+          invalidIndices: invalidLayers.map((x) => x.i),
+        });
+      }
 
-      // Filter out same-source pairs (invalid for cross-source harmonization)
-      const sameSourcePairs: string[] = [];
-      const crossSourcePairsData = pairsData.filter((p) => {
-        const sourcePrefix = getSourcePrefix(p.sourceId);
-        const targetPrefix = getSourcePrefix(p.targetId);
-        if (sourcePrefix !== "unknown" && sourcePrefix === targetPrefix) {
-          sameSourcePairs.push(`${p.sourceId} ↔ ${p.targetId}`);
-          return false;
-        }
-        return true;
-      });
+      // ── Same-source filtering (config-driven, opt-in per campaign) ─────────
+      // Only filters when the campaign enables sourcePrefixFilter, using its
+      // configured prefixes (no hardcoded arivale_/il10k_/ukbb_ list).
+      const config = await storage.getCampaignConfig(campaignId);
+      let sameSourcePairs: string[] = [];
+      let crossSourcePairsData = pairsData;
+      if (config.import.sourcePrefixFilter) {
+        const prefixes = config.import.sourcePrefixes ?? [];
+        const prefixOf = (id: string): string | null =>
+          prefixes.find((pre) => id.startsWith(pre)) ?? null;
+        crossSourcePairsData = pairsData.filter((p) => {
+          const sp = prefixOf(p.sourceId);
+          const tp = prefixOf(p.targetId);
+          if (sp !== null && sp === tp) {
+            sameSourcePairs.push(`${p.sourceId} ↔ ${p.targetId}`);
+            return false;
+          }
+          return true;
+        });
+      }
 
       // ── Duplicate detection ───────────────────────────────────────────────
       // Fetch all existing source_id + target_id combinations for this campaign
