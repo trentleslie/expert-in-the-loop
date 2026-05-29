@@ -81,6 +81,7 @@ export interface IStorage {
     pair: Pair;
     votes: Vote[];
     positiveRate: number | null;
+    totalVoteCount: number;
   }[]>;
   
   // Results Browser (paginated)
@@ -660,20 +661,26 @@ export class DatabaseStorage implements IStorage {
   // Export
   async getCampaignExportData(campaignId: string) {
     const campaignPairs = await db.select().from(pairs).where(eq(pairs.campaignId, campaignId));
-    
+
     const result = [];
     for (const pair of campaignPairs) {
-      const pairVotes = await this.getVotesByPair(pair.id);
+      const pairVotes = await this.getVotesByPair(pair.id); // active votes only
       const positiveVotes = pairVotes.filter(v => v.scoreBinary === "match").length;
       const positiveRate = pairVotes.length > 0 ? positiveVotes / pairVotes.length : null;
-      
+      // Total rows in the supersession chain (active + superseded) for provenance.
+      const [totalRow] = await db
+        .select({ c: count() })
+        .from(votes)
+        .where(eq(votes.pairId, pair.id));
+
       result.push({
         pair,
         votes: pairVotes,
         positiveRate,
+        totalVoteCount: totalRow?.c ?? 0,
       });
     }
-    
+
     return result;
   }
 

@@ -457,19 +457,31 @@ export async function registerRoutes(
         target_text: item.pair.targetText,
         target_dataset: item.pair.targetDataset,
         target_id: item.pair.targetId,
+        // Stored, engine-computed status + provenance (R12/R15) — replaces the
+        // old ad-hoc 0.5-threshold consensus column.
+        evidence_status: item.pair.evidenceStatus,
+        resolution_layer: item.pair.resolutionLayer,
         llm_confidence: item.pair.llmConfidence,
         llm_model: item.pair.llmModel,
-        vote_count: item.votes.length,
+        active_vote_count: item.votes.length,
+        total_vote_count: item.totalVoteCount,
         positive_votes: item.votes.filter((v) => v.scoreBinary === "match").length,
         negative_votes: item.votes.filter((v) => v.scoreBinary === "no_match").length,
         unsure_votes: item.votes.filter((v) => v.scoreBinary === "unsure").length,
         positive_rate: item.positiveRate !== null ? item.positiveRate.toFixed(3) : "",
-        consensus: item.positiveRate !== null ? (item.positiveRate > 0.5 ? "match" : "no_match") : "",
         expert_selections: item.votes.filter(v => v.expertSelectedCode).map(v => v.expertSelectedCode).join("; "),
         reviewer_notes: item.votes.filter(v => v.reviewerNotes).map(v => v.reviewerNotes).join(" | "),
       }));
 
-      const csv = stringify(csvData, { header: true });
+      const csv = stringify(csvData, {
+        header: true,
+        // Neutralize CSV/spreadsheet formula injection: any string cell starting
+        // with =, +, -, @, tab, or CR is prefixed with a single quote. Metadata
+        // and free-text come from imported CSVs and reach BioMapper/RoP operators.
+        cast: {
+          string: (value) => (/^[=+\-@\t\r]/.test(value) ? `'${value}` : value),
+        },
+      });
       
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", `attachment; filename="${campaign.name.replace(/\s+/g, "_")}_export.csv"`);
