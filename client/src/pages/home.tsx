@@ -15,6 +15,82 @@ import {
 import { Link } from "wouter";
 import { useAuth } from "@/lib/auth";
 import type { CampaignWithStats, UserStats } from "@shared/schema";
+import {
+  EVIDENCE_TIER_META,
+  EVIDENCE_TIER_ORDER,
+} from "@/lib/evidenceTiers";
+
+/**
+ * Segmented evidence-tier progress bar for a campaign. Falls back to a flat
+ * percentage Progress when evidenceTiers is absent (older API responses / not
+ * tracked). The all-unreviewed case renders an all-grey bar with a "0% reviewed"
+ * summary rather than an empty bar.
+ */
+function EvidenceTierProgress({
+  campaign,
+  progress,
+}: {
+  campaign: CampaignWithStats;
+  progress: number;
+}) {
+  const tiers = campaign.evidenceTiers;
+
+  // No tier data available — fall back to the flat percentage bar.
+  if (!tiers) {
+    return (
+      <>
+        <Progress value={progress} className="h-2" />
+        <p className="text-xs text-muted-foreground text-right">{progress}% complete</p>
+      </>
+    );
+  }
+
+  const total = EVIDENCE_TIER_ORDER.reduce((sum, t) => sum + (tiers[t] ?? 0), 0);
+
+  return (
+    <>
+      <div
+        className="flex h-2 w-full overflow-hidden rounded-full bg-muted"
+        role="img"
+        aria-label={EVIDENCE_TIER_ORDER.map(
+          (t) => `${EVIDENCE_TIER_META[t].label}: ${tiers[t] ?? 0}`,
+        ).join(", ")}
+        data-testid={`evidence-bar-${campaign.id}`}
+      >
+        {total > 0 &&
+          EVIDENCE_TIER_ORDER.map((t) => {
+            const count = tiers[t] ?? 0;
+            if (count === 0) return null;
+            return (
+              <div
+                key={t}
+                style={{
+                  width: `${(count / total) * 100}%`,
+                  backgroundColor: EVIDENCE_TIER_META[t].barColor,
+                }}
+                title={`${EVIDENCE_TIER_META[t].label}: ${count}`}
+              />
+            );
+          })}
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        {EVIDENCE_TIER_ORDER.filter((t) => (tiers[t] ?? 0) > 0).map((t) => {
+          const Icon = EVIDENCE_TIER_META[t].icon;
+          return (
+            <span key={t} className="inline-flex items-center gap-1">
+              <Icon
+                className="w-3 h-3"
+                style={{ color: EVIDENCE_TIER_META[t].barColor }}
+              />
+              {tiers[t]} {EVIDENCE_TIER_META[t].label.toLowerCase()}
+            </span>
+          );
+        })}
+        {total === 0 && <span>No pairs yet</span>}
+      </div>
+    </>
+  );
+}
 
 function CampaignCard({ campaign }: { campaign: CampaignWithStats }) {
   const progress = campaign.totalPairs > 0 
@@ -76,8 +152,7 @@ function CampaignCard({ campaign }: { campaign: CampaignWithStats }) {
               {campaign.reviewedPairs} / {campaign.totalPairs} pairs
             </span>
           </div>
-          <Progress value={progress} className="h-2" />
-          <p className="text-xs text-muted-foreground text-right">{progress}% complete</p>
+          <EvidenceTierProgress campaign={campaign} progress={progress} />
         </div>
 
         <Link href={`/review/${campaign.id}`}>

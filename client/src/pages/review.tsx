@@ -33,11 +33,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
+import { ScoringControls, type BinaryValue } from "@/components/ScoringControls";
 import {
-  ThumbsUp,
-  ThumbsDown,
   SkipForward,
   ArrowLeft,
   Keyboard,
@@ -45,13 +42,13 @@ import {
   CheckCircle2,
   AlertCircle,
   AlertTriangle,
-  Loader2,
-  ExternalLink,
-  HelpCircle,
+  ExternalLink as ExternalLinkIcon,
   FileText,
   Bot,
 } from "lucide-react";
 import type { Campaign, Pair } from "@shared/schema";
+import type { CampaignConfig } from "@shared/campaignConfig";
+import { DEFAULT_CAMPAIGN_CONFIG } from "@shared/campaignConfig";
 
 type NextPairResponse = {
   pair: Pair | null;
@@ -65,63 +62,84 @@ type NextPairResponse = {
   };
 };
 
-function LoincLink({ code, className }: { code: string; className?: string }) {
-  // Don't render as a link for special values like NO_MATCH
-  if (!code || code === "NO_MATCH" || code.startsWith("NO_")) {
-    return <span className={`font-mono ${className || ""}`}>{code}</span>;
+/**
+ * Generic external link for an entity id, driven by the campaign config's
+ * `display.linkTemplate`. The template's `{targetId}` placeholder is replaced
+ * with the URL-encoded id. Renders plain text (no link) when:
+ *  - external links are disabled,
+ *  - no usable template is supplied (missing or lacking `{targetId}`),
+ *  - the id is a sentinel value such as NO_MATCH.
+ * The config schema already constrains the template scheme to https://; we still
+ * encodeURIComponent the id defensively.
+ */
+function ExternalEntityLink({
+  id,
+  showExternalLinks,
+  linkTemplate,
+  className,
+}: {
+  id: string;
+  showExternalLinks: boolean;
+  linkTemplate?: string;
+  className?: string;
+}) {
+  const isSentinel = !id || id === "NO_MATCH" || id.startsWith("NO_");
+  const hasUsableTemplate = !!linkTemplate && linkTemplate.includes("{targetId}");
+
+  if (!showExternalLinks || isSentinel || !hasUsableTemplate) {
+    return <span className={`font-mono ${className || ""}`}>{id}</span>;
   }
-  const loincUrl = `https://loinc.org/${code}`;
+
+  const href = linkTemplate!.replace("{targetId}", encodeURIComponent(id));
   return (
-    <a 
-      href={loincUrl} 
-      target="_blank" 
+    <a
+      href={href}
+      target="_blank"
       rel="noopener noreferrer"
       className={`inline-flex items-center gap-1 text-primary hover:underline ${className || ""}`}
-      data-testid={`link-loinc-${code}`}
+      data-testid={`link-external-${id}`}
     >
-      {code}
-      <ExternalLink className="w-3 h-3" />
+      {id}
+      <ExternalLinkIcon className="w-3 h-3" />
     </a>
   );
 }
 
-type LoincAlternative = {
+type Alternative = {
   code: string;
   name?: string;
   confidence?: number;
   vector_similarity?: number;
 };
 
-function parseTop5Loinc(value: unknown): LoincAlternative[] {
-  if (!value) return [];
-  try {
-    if (typeof value === "string") {
-      // Handle Python-style list string: "['code1', 'code2']" or JSON array
-      const cleaned = value.replace(/'/g, '"');
-      const parsed = JSON.parse(cleaned);
-      if (Array.isArray(parsed)) {
-        return parsed.map((item) => {
-          if (typeof item === "string") {
-            return { code: item };
-          }
-          if (typeof item === "object" && item !== null && item.code) {
-            return item as LoincAlternative;
-          }
-          return null;
-        }).filter((item): item is LoincAlternative => item !== null);
-      }
-    }
-    if (Array.isArray(value)) {
-      return value.map((item) => {
-        if (typeof item === "string") {
-          return { code: item };
-        }
+/**
+ * Parse expert-alternative suggestions generically from entity metadata. Prefers
+ * a generic `alternatives` key; falls back to the legacy `top_5_loinc` key for
+ * back-compat with LOINC imports. Handles JSON arrays, Python-style list strings
+ * ("['a','b']"), and arrays of either bare strings or {code,name,...} objects.
+ */
+function parseAlternatives(metadata: Record<string, unknown> | null | undefined): Alternative[] {
+  if (!metadata) return [];
+  const raw = metadata.alternatives ?? metadata.top_5_loinc;
+  if (!raw) return [];
+
+  const normalize = (arr: unknown[]): Alternative[] =>
+    arr
+      .map((item) => {
+        if (typeof item === "string") return { code: item };
         if (typeof item === "object" && item !== null && (item as any).code) {
-          return item as LoincAlternative;
+          return item as Alternative;
         }
         return null;
-      }).filter((item): item is LoincAlternative => item !== null);
+      })
+      .filter((item): item is Alternative => item !== null);
+
+  try {
+    if (typeof raw === "string") {
+      const parsed = JSON.parse(raw.replace(/'/g, '"'));
+      if (Array.isArray(parsed)) return normalize(parsed);
     }
+    if (Array.isArray(raw)) return normalize(raw);
   } catch {
     return [];
   }
@@ -134,19 +152,23 @@ function EntityCard({
   dataset,
   id,
   metadata,
+  display,
 }: {
   type: "source" | "target";
   text: string;
   dataset: string;
   id: string;
   metadata?: Record<string, unknown> | null;
+  display: CampaignConfig["display"];
 }) {
-  const isLoinc = dataset.toUpperCase() === "LOINC";
-  const top5Loinc = parseTop5Loinc(metadata?.top_5_loinc);
-  
-  // Filter out top_5_loinc from displayed metadata since we show it separately
-  const displayMetadata = metadata 
-    ? Object.entries(metadata).filter(([key]) => key !== "top_5_loinc").slice(0, 3)
+  const alternatives = display.showAlternatives ? parseAlternatives(metadata) : [];
+
+  // Filter out the alternatives keys from displayed metadata since they're shown
+  // separately. Only render the metadata badges when the panel is enabled.
+  const displayMetadata = display.showMetadataPanel && metadata
+    ? Object.entries(metadata)
+        .filter(([key]) => key !== "top_5_loinc" && key !== "alternatives")
+        .slice(0, 3)
     : [];
 
   return (
@@ -167,7 +189,12 @@ function EntityCard({
         </p>
         <div className="mt-4 pt-3 border-t border-border space-y-2">
           <p className="text-sm font-mono text-muted-foreground" data-testid={`text-entity-id-${type}`}>
-            ID: {isLoinc ? <LoincLink code={id} /> : id}
+            ID:{" "}
+            <ExternalEntityLink
+              id={id}
+              showExternalLinks={display.showExternalLinks}
+              linkTemplate={display.linkTemplate}
+            />
           </p>
           {displayMetadata.length > 0 && (
             <div className="flex flex-wrap gap-1">
@@ -178,13 +205,18 @@ function EntityCard({
               ))}
             </div>
           )}
-          {top5Loinc.length > 0 && (
+          {alternatives.length > 0 && (
             <div className="pt-2">
               <p className="text-xs text-muted-foreground mb-1">Alternative suggestions:</p>
               <div className="flex flex-col gap-1">
-                {top5Loinc.map((alt) => (
+                {alternatives.map((alt) => (
                   <div key={alt.code} className="flex items-center gap-2 text-xs">
-                    <LoincLink code={alt.code} className="font-mono shrink-0" />
+                    <ExternalEntityLink
+                      id={alt.code}
+                      showExternalLinks={display.showExternalLinks}
+                      linkTemplate={display.linkTemplate}
+                      className="shrink-0"
+                    />
                     {alt.name && (
                       <span className="text-muted-foreground truncate">{alt.name}</span>
                     )}
@@ -238,15 +270,19 @@ function ConfidenceIndicator({ confidence, model }: { confidence: number | null;
   );
 }
 
-function KeyboardShortcuts({ isNumericMode }: { isNumericMode: boolean }) {
-  if (isNumericMode) {
+function KeyboardShortcuts({ scoring }: { scoring: CampaignConfig["scoring"] }) {
+  if (scoring.mode === "numeric") {
+    const { min, max } = scoring.numeric;
+    const keys: number[] = [];
+    // Only the single-digit 1-9 keys map to scores (see keydown handler).
+    for (let i = Math.max(min, 1); i <= Math.min(max, 9); i++) keys.push(i);
     return (
       <div className="flex items-center justify-center gap-6 py-3 text-xs text-muted-foreground flex-wrap">
         <div className="flex items-center gap-1.5">
           <Keyboard className="w-3.5 h-3.5" />
           <span>Keyboard shortcuts:</span>
         </div>
-        {[1, 2, 3, 4, 5].map((n) => (
+        {keys.map((n) => (
           <div key={n} className="flex items-center gap-1">
             <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">{n}</kbd>
             <span>Score {n}</span>
@@ -259,7 +295,8 @@ function KeyboardShortcuts({ isNumericMode }: { isNumericMode: boolean }) {
       </div>
     );
   }
-  
+
+  const { labels } = scoring.binary;
   return (
     <div className="flex items-center justify-center gap-6 py-3 text-xs text-muted-foreground flex-wrap">
       <div className="flex items-center gap-1.5">
@@ -268,15 +305,15 @@ function KeyboardShortcuts({ isNumericMode }: { isNumericMode: boolean }) {
       </div>
       <div className="flex items-center gap-1">
         <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">←</kbd>
-        <span>Reject</span>
+        <span>{labels.negative}</span>
       </div>
       <div className="flex items-center gap-1">
         <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">U</kbd>
-        <span>Unsure</span>
+        <span>{labels.neutral}</span>
       </div>
       <div className="flex items-center gap-1">
         <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">→</kbd>
-        <span>Confirm</span>
+        <span>{labels.positive}</span>
       </div>
       <div className="flex items-center gap-1">
         <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">↓</kbd>
@@ -312,7 +349,6 @@ export default function ReviewPage() {
   const [sessionStats, setSessionStats] = useState({ reviewCount: 0, streak: 0 });
   const [expertSelectedCode, setExpertSelectedCode] = useState<string | null>(null);
   const [reviewerNotes, setReviewerNotes] = useState("");
-  const [isNumericMode, setIsNumericMode] = useState(false);
 
   // Accordion panel state with localStorage persistence
   const [expandedPanels, setExpandedPanels] = useState<string[]>(() => {
@@ -344,6 +380,11 @@ export default function ReviewPage() {
     queryKey: [`/api/campaigns/${campaignId}`, "detail", campaignId],
     enabled: !!campaignId,
   });
+
+  // Campaign-level config drives scoring mode, labels, and which review-UI
+  // elements show. Fall back to the shared default when unset.
+  const config: CampaignConfig = campaign?.config ?? DEFAULT_CAMPAIGN_CONFIG;
+  const { scoring, display } = config;
 
   const { 
     data: pairData, 
@@ -442,12 +483,14 @@ export default function ReviewPage() {
   const confirmVote = useCallback(() => {
     if (!pendingVote || !pairData?.pair) return;
 
+    // Send values matching the campaign config's scoring mode; the server
+    // derives scoringMode from config and rejects shape mismatches.
     if (pendingVote.type === 'binary') {
       voteMutation.mutate({
         pairId: pairData.pair.id,
         scoreBinary: pendingVote.value,
         scoreNumeric: null,
-        scoringMode: "binary",
+        scoringMode: scoring.mode,
         expertCode: expertSelectedCode,
         notes: reviewerNotes,
       });
@@ -456,13 +499,13 @@ export default function ReviewPage() {
         pairId: pairData.pair.id,
         scoreBinary: null,
         scoreNumeric: pendingVote.value,
-        scoringMode: "numeric",
+        scoringMode: scoring.mode,
         expertCode: expertSelectedCode,
         notes: reviewerNotes,
       });
     }
     setPendingVote(null);
-  }, [pendingVote, pairData?.pair, voteMutation, expertSelectedCode, reviewerNotes]);
+  }, [pendingVote, pairData?.pair, voteMutation, expertSelectedCode, reviewerNotes, scoring.mode]);
 
   const confirmSkip = useCallback(() => {
     if (!pairData?.pair) return;
@@ -501,10 +544,14 @@ export default function ReviewPage() {
 
       if (voteMutation.isPending || skipMutation.isPending || !pairData?.pair) return;
 
-      if (isNumericMode) {
-        // Numeric mode: 1-5 keys for scoring
+      if (scoring.mode === "numeric") {
+        // Numeric mode: single-digit keys (1-9) within the configured range.
         const numKey = parseInt(e.key);
-        if (numKey >= 1 && numKey <= 5) {
+        if (
+          !Number.isNaN(numKey) &&
+          numKey >= Math.max(scoring.numeric.min, 1) &&
+          numKey <= Math.min(scoring.numeric.max, 9)
+        ) {
           e.preventDefault();
           handleNumericVote(numKey);
           return;
@@ -535,7 +582,7 @@ export default function ReviewPage() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleBinaryVote, handleNumericVote, handleSkip, voteMutation.isPending, skipMutation.isPending, pairData?.pair, isNumericMode, pendingVote, pendingSkip, confirmVote, confirmSkip, cancelPendingAction]);
+  }, [handleBinaryVote, handleNumericVote, handleSkip, voteMutation.isPending, skipMutation.isPending, pairData?.pair, scoring, pendingVote, pendingSkip, confirmVote, confirmSkip, cancelPendingAction]);
 
   const progress = pairData?.progress 
     ? Math.round((pairData.progress.reviewed / Math.max(pairData.progress.total, 1)) * 100)
@@ -632,6 +679,7 @@ export default function ReviewPage() {
                 dataset={pairData.pair.sourceDataset}
                 id={pairData.pair.sourceId}
                 metadata={pairData.pair.sourceMetadata as Record<string, unknown> | null}
+                display={display}
               />
               <EntityCard
                 type="target"
@@ -639,6 +687,7 @@ export default function ReviewPage() {
                 dataset={pairData.pair.targetDataset}
                 id={pairData.pair.targetId}
                 metadata={pairData.pair.targetMetadata as Record<string, unknown> | null}
+                display={display}
               />
             </div>
 
@@ -734,34 +783,36 @@ export default function ReviewPage() {
             {/* Expert selection and notes */}
             <Card className="border-card-border">
               <CardContent className="p-4 space-y-4">
-                {/* Expert alternative selection */}
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">
-                    Suggest alternative match (optional)
-                  </label>
-                  <Select
-                    value={expertSelectedCode || "none"}
-                    onValueChange={(value) => setExpertSelectedCode(value === "none" ? null : value)}
-                  >
-                    <SelectTrigger data-testid="select-expert-code">
-                      <SelectValue placeholder="Select from alternatives..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None (use AI suggestion)</SelectItem>
-                      {parseTop5Loinc((pairData.pair.targetMetadata as Record<string, unknown> | null)?.top_5_loinc).map((alt) => (
-                        <SelectItem key={alt.code} value={alt.code}>
-                          <span className="flex items-center gap-2">
-                            <span className="font-mono">{alt.code}</span>
-                            {alt.name && <span className="text-muted-foreground text-xs truncate max-w-48">{alt.name}</span>}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    If the AI's suggestion isn't correct, select a better match from the alternatives
-                  </p>
-                </div>
+                {/* Expert alternative selection (gated on config.display.showAlternatives) */}
+                {display.showAlternatives && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">
+                      Suggest alternative match (optional)
+                    </label>
+                    <Select
+                      value={expertSelectedCode || "none"}
+                      onValueChange={(value) => setExpertSelectedCode(value === "none" ? null : value)}
+                    >
+                      <SelectTrigger data-testid="select-expert-code">
+                        <SelectValue placeholder="Select from alternatives..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None (use AI suggestion)</SelectItem>
+                        {parseAlternatives(pairData.pair.targetMetadata as Record<string, unknown> | null).map((alt) => (
+                          <SelectItem key={alt.code} value={alt.code}>
+                            <span className="flex items-center gap-2">
+                              <span className="font-mono">{alt.code}</span>
+                              {alt.name && <span className="text-muted-foreground text-xs truncate max-w-48">{alt.name}</span>}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      If the AI's suggestion isn't correct, select a better match from the alternatives
+                    </p>
+                  </div>
+                )}
 
                 {/* Notes field */}
                 <div className="space-y-2">
@@ -786,101 +837,16 @@ export default function ReviewPage() {
 
             <Separator />
 
-            {/* Scoring mode toggle */}
-            <div className="flex items-center justify-center gap-4">
-              <Label htmlFor="scoring-mode" className="text-sm text-muted-foreground">
-                Binary Mode
-              </Label>
-              <Switch
-                id="scoring-mode"
-                checked={isNumericMode}
-                onCheckedChange={setIsNumericMode}
-                data-testid="switch-scoring-mode"
-              />
-              <Label htmlFor="scoring-mode" className="text-sm text-muted-foreground">
-                Numeric Mode (1-5)
-              </Label>
-            </div>
-
-            {/* Voting buttons */}
+            {/* Voting controls (config-driven: binary or numeric) */}
             <div className="space-y-4">
-              {isNumericMode ? (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-center gap-2">
-                    {[1, 2, 3, 4, 5].map((score) => (
-                      <Button
-                        key={score}
-                        size="lg"
-                        variant={score >= 4 ? "default" : score <= 2 ? "outline" : "secondary"}
-                        className="h-14 w-14 text-lg font-semibold"
-                        onClick={() => handleNumericVote(score)}
-                        disabled={isSubmitting}
-                        data-testid={`button-score-${score}`}
-                      >
-                        {isSubmitting ? (
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                        ) : (
-                          score
-                        )}
-                      </Button>
-                    ))}
-                  </div>
-                  <div className="flex items-center justify-center gap-4 text-xs text-muted-foreground">
-                    <span>1 = Unrelated</span>
-                    <span>2 = Tangential</span>
-                    <span>3 = Similar</span>
-                    <span>4 = Strong</span>
-                    <span>5 = Exact</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center gap-3 flex-wrap">
-                  <Button
-                    size="lg"
-                    variant="outline"
-                    className="h-14 px-6 gap-2"
-                    onClick={() => handleBinaryVote("no_match")}
-                    disabled={isSubmitting}
-                    data-testid="button-no-match"
-                  >
-                    {isSubmitting ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <ThumbsDown className="w-5 h-5" />
-                    )}
-                    Reject
-                  </Button>
-                  <Button
-                    size="lg"
-                    variant="secondary"
-                    className="h-14 px-6 gap-2"
-                    onClick={() => handleBinaryVote("unsure")}
-                    disabled={isSubmitting}
-                    data-testid="button-unsure"
-                  >
-                    {isSubmitting ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <HelpCircle className="w-5 h-5" />
-                    )}
-                    Unsure
-                  </Button>
-                  <Button
-                    size="lg"
-                    className="h-14 px-6 gap-2"
-                    onClick={() => handleBinaryVote("match")}
-                    disabled={isSubmitting}
-                    data-testid="button-yes-match"
-                  >
-                    {isSubmitting ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <ThumbsUp className="w-5 h-5" />
-                    )}
-                    Confirm
-                  </Button>
-                </div>
-              )}
+              <ScoringControls
+                scoring={scoring}
+                isSubmitting={isSubmitting}
+                binaryValue={pendingVote?.type === "binary" ? pendingVote.value : null}
+                onBinarySelect={handleBinaryVote}
+                numericValue={pendingVote?.type === "numeric" ? pendingVote.value : null}
+                onNumericSelect={handleNumericVote}
+              />
 
               <div className="flex justify-center">
                 <Button
@@ -898,7 +864,7 @@ export default function ReviewPage() {
             </div>
 
             {/* Keyboard shortcuts */}
-            <KeyboardShortcuts isNumericMode={isNumericMode} />
+            <KeyboardShortcuts scoring={scoring} />
           </>
         )}
       </div>
@@ -912,17 +878,21 @@ export default function ReviewPage() {
               <div className="space-y-3">
                 <p>You are about to submit:</p>
                 <p className="text-2xl font-semibold text-center py-2">
-                  {pendingVote?.type === 'binary' ? (
-                    pendingVote.value === 'match' ? '👍 Match' :
-                    pendingVote.value === 'no_match' ? '👎 No Match' : '🤷 Unsure'
-                  ) : (
-                    `${pendingVote?.value} - ${
-                      pendingVote?.value === 1 ? 'No Match' :
-                      pendingVote?.value === 2 ? 'Weak Match' :
-                      pendingVote?.value === 3 ? 'Moderate Match' :
-                      pendingVote?.value === 4 ? 'Strong Match' : 'Perfect Match'
-                    }`
-                  )}
+                  {pendingVote?.type === 'binary'
+                    ? (scoring.mode === 'binary'
+                        ? (pendingVote.value === 'match'
+                            ? scoring.binary.labels.positive
+                            : pendingVote.value === 'no_match'
+                              ? scoring.binary.labels.negative
+                              : scoring.binary.labels.neutral)
+                        : pendingVote.value)
+                    : pendingVote
+                      ? `${pendingVote.value}${
+                          scoring.mode === 'numeric' && scoring.numeric.labels?.[String(pendingVote.value)]
+                            ? ` - ${scoring.numeric.labels[String(pendingVote.value)]}`
+                            : ''
+                        }`
+                      : ''}
                 </p>
                 <p className="text-sm text-muted-foreground">
                   <strong>Notes:</strong> {reviewerNotes.trim() || 'No notes'}

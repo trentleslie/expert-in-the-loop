@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { getAuth, clerkClient } from "@clerk/express";
 import multer from "multer";
@@ -7,6 +7,7 @@ import { stringify } from "csv-stringify/sync";
 import { storage } from "./storage";
 import { requireAuth, requireAdmin } from "./auth";
 import { insertCampaignSchema, insertVoteSchema, type InsertPair } from "@shared/schema";
+import { RESOLUTION_LAYER_VALUES, campaignConfigSchema } from "@shared/campaignConfig";
 import { z } from "zod";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -129,6 +130,41 @@ export async function registerRoutes(
     }
   });
 
+  // Update campaign config (admin only). Validates against the shared contract,
+  // persists, and — if the campaign already has votes — bulk-recomputes evidence
+  // status under the new config (consensus thresholds / scoring mode may change
+  // every pair's tier). Returns the recompute outcome so the UI can show
+  // running -> done/failed.
+  app.put("/api/campaigns/:id/config", requireAdmin, async (req, res) => {
+    try {
+      const campaign = await storage.getCampaign(req.params.id);
+      if (!campaign) {
+        return res.status(404).json({ message: "Campaign not found" });
+      }
+
+      const parsed = campaignConfigSchema.safeParse(req.body?.config);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid campaign config", errors: parsed.error.errors });
+      }
+
+      await storage.updateCampaignConfig(req.params.id, parsed.data);
+
+      // Only campaigns with existing votes need a recompute — a config edit on a
+      // not-yet-reviewed campaign just takes effect on future votes.
+      const progress = await storage.getCampaignProgress(req.params.id);
+      if (progress.reviewed > 0) {
+        const result = await storage.recomputeCampaignEvidenceStatus(req.params.id);
+        return res.json({ success: true, recomputed: result.recomputed, recomputeStatus: result.status });
+      }
+
+      return res.json({ success: true, recomputed: 0, recomputeStatus: "idle" });
+    } catch (error) {
+      console.error("Error updating campaign config:", error);
+      // recomputeCampaignEvidenceStatus already persisted recomputeStatus='failed'.
+      res.status(500).json({ message: "Failed to update campaign config", recomputeStatus: "failed" });
+    }
+  });
+
   // Upload pairs to campaign (admin only)
   // Accepts two formats:
   //   1. multipart/form-data with a "file" field (CSV or JSON file upload)
@@ -152,8 +188,8 @@ export async function registerRoutes(
           return res.status(400).json({ message: "Request body must contain a non-empty 'pairs' array" });
         }
 
-        // Validate each pair has the required fields
-        const validPairTypes = ["questionnaire_match", "loinc_mapping"];
+        // Validate each pair has the required fields. pairType is now free-text
+        // (defaults to the campaign type) — no fixed allowlist.
         const invalidPairs: number[] = [];
 
         pairsData = rawPairs.map((p: any, idx: number) => {
@@ -165,13 +201,14 @@ export async function registerRoutes(
           const targetDataset = p.target_dataset || p.targetDataset;
           const targetId = p.target_id || p.targetId;
 
-          if (!sourceText || !sourceId || !targetText || !targetId || !validPairTypes.includes(pairType)) {
+          if (!sourceText || !sourceId || !targetText || !targetId) {
             invalidPairs.push(idx);
           }
 
           return {
             campaignId,
-            pairType: pairType as "questionnaire_match" | "loinc_mapping",
+            pairType,
+            resolutionLayer: p.resolution_layer || p.resolutionLayer || "unspecified",
             sourceText: sourceText || "",
             sourceDataset: sourceDataset || "Unknown",
             sourceId: sourceId || "",
@@ -190,7 +227,7 @@ export async function registerRoutes(
 
         if (invalidPairs.length > 0) {
           return res.status(400).json({
-            message: `${invalidPairs.length} pair(s) are missing required fields (sourceText, sourceId, targetText, targetId) or have an invalid pairType. Valid types: ${validPairTypes.join(", ")}`,
+            message: `${invalidPairs.length} pair(s) are missing required fields (sourceText, sourceId, targetText, targetId).`,
             invalidIndices: invalidPairs,
           });
         }
@@ -210,6 +247,7 @@ export async function registerRoutes(
           pairsData = rawPairs.map((p: any) => ({
             campaignId,
             pairType: p.pair_type || p.pairType || campaign.campaignType,
+            resolutionLayer: p.resolution_layer || p.resolutionLayer || "unspecified",
             sourceText: p.source_text || p.sourceText,
             sourceDataset: p.source_dataset || p.sourceDataset,
             sourceId: p.source_id || p.sourceId,
@@ -230,34 +268,40 @@ export async function registerRoutes(
             trim: true,
           });
 
-          pairsData = records.map((row: any) => {
-            // Build metadata from extra columns
-            const sourceMetadata: Record<string, unknown> = {};
-            const targetMetadata: Record<string, unknown> = {};
+          // Standard field columns are mapped explicitly; ALL other columns are
+          // preserved verbatim in sourceMetadata (no LOINC-specific fallbacks or
+          // hardcoded metadata keys). For precise source/target metadata splits,
+          // use the column-mapping wizard (JSON path above). Stored as raw
+          // strings — downstream renders them text-only (never as HTML).
+          const STANDARD_COLS = new Set([
+            "source_text", "source_dataset", "source_id", "source_metadata",
+            "target_text", "target_dataset", "target_id", "target_metadata",
+            "pair_type", "resolution_layer", "llm_confidence", "confidence_score",
+            "llm_model", "llm_reasoning",
+          ]);
 
-            if (row.category) sourceMetadata.category = row.category;
-            if (row.units) sourceMetadata.units = row.units;
-            if (row.data_type) sourceMetadata.data_type = row.data_type;
-            if (row.query_source) sourceMetadata.query_source = row.query_source;
-            if (row.num_queries) sourceMetadata.num_queries = row.num_queries;
-            if (row.top_5_loinc) targetMetadata.top_5_loinc = row.top_5_loinc;
+          pairsData = records.map((row: any) => {
+            const extraMetadata: Record<string, unknown> = {};
+            for (const [key, value] of Object.entries(row)) {
+              if (!STANDARD_COLS.has(key) && value !== "" && value != null) {
+                extraMetadata[key] = value;
+              }
+            }
 
             return {
               campaignId,
               pairType: row.pair_type || campaign.campaignType,
-              // Support both standard names and Arivale/LOINC format
-              sourceText: row.source_text || row.description,
-              sourceDataset: row.source_dataset || row.cohort || "Unknown",
-              sourceId: row.source_id || row.field_name,
+              resolutionLayer: row.resolution_layer || "unspecified",
+              sourceText: row.source_text,
+              sourceDataset: row.source_dataset || "Unknown",
+              sourceId: row.source_id,
               sourceMetadata: row.source_metadata
                 ? JSON.parse(row.source_metadata)
-                : (Object.keys(sourceMetadata).length > 0 ? sourceMetadata : null),
-              targetText: row.target_text || row.loinc_name,
-              targetDataset: row.target_dataset || (row.loinc_code ? "LOINC" : "Unknown"),
-              targetId: row.target_id || row.loinc_code,
-              targetMetadata: row.target_metadata
-                ? JSON.parse(row.target_metadata)
-                : (Object.keys(targetMetadata).length > 0 ? targetMetadata : null),
+                : (Object.keys(extraMetadata).length > 0 ? extraMetadata : null),
+              targetText: row.target_text,
+              targetDataset: row.target_dataset || "Unknown",
+              targetId: row.target_id,
+              targetMetadata: row.target_metadata ? JSON.parse(row.target_metadata) : null,
               llmConfidence: row.llm_confidence
                 ? parseFloat(row.llm_confidence)
                 : (row.confidence_score ? parseFloat(row.confidence_score) : null),
@@ -268,26 +312,39 @@ export async function registerRoutes(
         }
       }
 
-      // ── Same-source pair detection ───────────────────────────────────────
-      // Helper function to extract source prefix from question ID
-      const getSourcePrefix = (id: string): string => {
-        if (id.startsWith("arivale_")) return "arivale";
-        if (id.startsWith("il10k_")) return "il10k";
-        if (id.startsWith("ukbb_")) return "ukbb";
-        return "unknown";
-      };
+      // ── Provenance validation ────────────────────────────────────────────
+      // resolutionLayer flows to downstream exports — reject unknown values
+      // rather than silently mislabeling provenance.
+      const invalidLayers = pairsData
+        .map((p, i) => ({ i, rl: p.resolutionLayer }))
+        .filter((x) => x.rl != null && !(RESOLUTION_LAYER_VALUES as readonly string[]).includes(x.rl));
+      if (invalidLayers.length > 0) {
+        return res.status(400).json({
+          message: `Invalid resolution_layer value(s). Allowed: ${RESOLUTION_LAYER_VALUES.join(", ")}.`,
+          invalidIndices: invalidLayers.map((x) => x.i),
+        });
+      }
 
-      // Filter out same-source pairs (invalid for cross-source harmonization)
-      const sameSourcePairs: string[] = [];
-      const crossSourcePairsData = pairsData.filter((p) => {
-        const sourcePrefix = getSourcePrefix(p.sourceId);
-        const targetPrefix = getSourcePrefix(p.targetId);
-        if (sourcePrefix !== "unknown" && sourcePrefix === targetPrefix) {
-          sameSourcePairs.push(`${p.sourceId} ↔ ${p.targetId}`);
-          return false;
-        }
-        return true;
-      });
+      // ── Same-source filtering (config-driven, opt-in per campaign) ─────────
+      // Only filters when the campaign enables sourcePrefixFilter, using its
+      // configured prefixes (no hardcoded arivale_/il10k_/ukbb_ list).
+      const config = await storage.getCampaignConfig(campaignId);
+      let sameSourcePairs: string[] = [];
+      let crossSourcePairsData = pairsData;
+      if (config.import.sourcePrefixFilter) {
+        const prefixes = config.import.sourcePrefixes ?? [];
+        const prefixOf = (id: string): string | null =>
+          prefixes.find((pre) => id.startsWith(pre)) ?? null;
+        crossSourcePairsData = pairsData.filter((p) => {
+          const sp = prefixOf(p.sourceId);
+          const tp = prefixOf(p.targetId);
+          if (sp !== null && sp === tp) {
+            sameSourcePairs.push(`${p.sourceId} ↔ ${p.targetId}`);
+            return false;
+          }
+          return true;
+        });
+      }
 
       // ── Duplicate detection ───────────────────────────────────────────────
       // Fetch all existing source_id + target_id combinations for this campaign
@@ -344,6 +401,15 @@ export async function registerRoutes(
     try {
       const campaignId = req.params.id;
       const userId = getAuth(req).userId!;
+
+      // Archived/completed campaigns are not open for voting (clean-slate
+      // isolation). storage.getNextPairForUser also guards, but return an
+      // explicit signal rather than a silent empty queue.
+      const campaign = await storage.getCampaign(campaignId);
+      if (!campaign) return res.status(404).json({ message: "Campaign not found" });
+      if (campaign.status === "archived" || campaign.status === "completed") {
+        return res.status(403).json({ message: "Campaign is not open for voting" });
+      }
 
       const pair = await storage.getNextPairForUser(campaignId, userId);
       const progress = await storage.getCampaignProgress(campaignId);
@@ -426,19 +492,31 @@ export async function registerRoutes(
         target_text: item.pair.targetText,
         target_dataset: item.pair.targetDataset,
         target_id: item.pair.targetId,
+        // Stored, engine-computed status + provenance (R12/R15) — replaces the
+        // old ad-hoc 0.5-threshold consensus column.
+        evidence_status: item.pair.evidenceStatus,
+        resolution_layer: item.pair.resolutionLayer,
         llm_confidence: item.pair.llmConfidence,
         llm_model: item.pair.llmModel,
-        vote_count: item.votes.length,
+        active_vote_count: item.votes.length,
+        total_vote_count: item.totalVoteCount,
         positive_votes: item.votes.filter((v) => v.scoreBinary === "match").length,
         negative_votes: item.votes.filter((v) => v.scoreBinary === "no_match").length,
         unsure_votes: item.votes.filter((v) => v.scoreBinary === "unsure").length,
         positive_rate: item.positiveRate !== null ? item.positiveRate.toFixed(3) : "",
-        consensus: item.positiveRate !== null ? (item.positiveRate > 0.5 ? "match" : "no_match") : "",
         expert_selections: item.votes.filter(v => v.expertSelectedCode).map(v => v.expertSelectedCode).join("; "),
         reviewer_notes: item.votes.filter(v => v.reviewerNotes).map(v => v.reviewerNotes).join(" | "),
       }));
 
-      const csv = stringify(csvData, { header: true });
+      const csv = stringify(csvData, {
+        header: true,
+        // Neutralize CSV/spreadsheet formula injection: any string cell starting
+        // with =, +, -, @, tab, or CR is prefixed with a single quote. Metadata
+        // and free-text come from imported CSVs and reach BioMapper/RoP operators.
+        cast: {
+          string: (value) => (/^[=+\-@\t\r]/.test(value) ? `'${value}` : value),
+        },
+      });
       
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", `attachment; filename="${campaign.name.replace(/\s+/g, "_")}_export.csv"`);
@@ -451,38 +529,62 @@ export async function registerRoutes(
 
   // ==================== PAIR/VOTE ROUTES ====================
 
-  // Submit vote for a pair
-  app.post("/api/pairs/:id/vote", requireAuth, async (req, res) => {
+  // Shared vote-cast handler. POST = first vote, PATCH = edit/correction; both
+  // create-or-supersede atomically (storage.castVote). No more 409-on-duplicate —
+  // a repeat vote supersedes the prior one. Reaching this with an existing vote
+  // only happens via the vote-history "edit" action (the review queue never
+  // re-serves a decided pair); supersession is therefore audit-only.
+  async function castVoteHandler(req: Request, res: Response) {
     try {
       const pairId = req.params.id;
-      const userId = getAuth(req).userId!;
+      const userId = getAuth(req).userId!; // server-authoritative — never trust the body
+
+      const pair = await storage.getPair(pairId);
+      if (!pair) return res.status(404).json({ message: "Pair not found" });
+
+      const campaign = await storage.getCampaign(pair.campaignId);
+      if (!campaign) return res.status(404).json({ message: "Campaign not found" });
+      if (campaign.status === "archived" || campaign.status === "completed") {
+        return res.status(403).json({ message: "Campaign is not open for voting" });
+      }
+
+      // Scoring mode is campaign-level — derive from config, don't trust req.body.
+      const config = await storage.getCampaignConfig(pair.campaignId);
+      const mode = config.scoring.mode;
+
+      // Reject votes whose shape mismatches the campaign's scoring mode.
+      if (mode === "binary" && (req.body.scoreBinary == null || req.body.scoreNumeric != null)) {
+        return res.status(400).json({ message: "This campaign uses binary scoring; provide scoreBinary only." });
+      }
+      if (mode === "numeric" && (req.body.scoreNumeric == null || req.body.scoreBinary != null)) {
+        return res.status(400).json({ message: "This campaign uses numeric scoring; provide scoreNumeric only." });
+      }
 
       const voteData = insertVoteSchema.parse({
         pairId,
         userId,
-        scoreBinary: req.body.scoreBinary,
-        scoreNumeric: req.body.scoreNumeric || null,
-        scoringMode: req.body.scoringMode || "binary",
-        // Expert selection and notes
-        expertSelectedCode: req.body.expertSelectedCode || null,
-        reviewerNotes: req.body.reviewerNotes || null,
+        scoreBinary: mode === "binary" ? req.body.scoreBinary : null,
+        scoreNumeric: mode === "numeric" ? req.body.scoreNumeric : null,
+        scoringMode: mode,
+        expertSelectedCode: req.body.expertSelectedCode ?? null,
+        reviewerNotes: req.body.reviewerNotes ?? null,
       });
 
-      const vote = await storage.createVote(voteData);
+      const { vote, evidenceStatus } = await storage.castVote(pairId, userId, voteData, config);
       await storage.updateUserLastActive(userId);
 
-      res.status(201).json(vote);
-    } catch (error: any) {
-      console.error("Error creating vote:", error);
-      if (error.code === "23505") {
-        return res.status(409).json({ message: "You have already voted on this pair" });
-      }
+      res.status(201).json({ ...vote, evidenceStatus });
+    } catch (error) {
+      console.error("Error casting vote:", error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid vote data", errors: error.errors });
       }
       res.status(500).json({ message: "Failed to submit vote" });
     }
-  });
+  }
+
+  // Submit vote for a pair
+  app.post("/api/pairs/:id/vote", requireAuth, castVoteHandler);
 
   // Skip a pair
   app.post("/api/pairs/:id/skip", requireAuth, async (req, res) => {
@@ -555,32 +657,9 @@ export async function registerRoutes(
     }
   });
 
-  // Update a vote (for corrections)
-  app.patch("/api/pairs/:id/vote", requireAuth, async (req, res) => {
-    try {
-      const pairId = req.params.id;
-      const userId = getAuth(req).userId!;
-      
-      const { scoreBinary, scoreNumeric, scoringMode, expertSelectedCode, reviewerNotes } = req.body;
-      
-      const updated = await storage.updateVote(pairId, userId, {
-        scoreBinary: scoreBinary !== undefined ? scoreBinary : undefined,
-        scoreNumeric: scoreNumeric !== undefined ? scoreNumeric : undefined,
-        scoringMode: scoringMode !== undefined ? scoringMode : undefined,
-        expertSelectedCode: expertSelectedCode !== undefined ? expertSelectedCode : undefined,
-        reviewerNotes: reviewerNotes !== undefined ? reviewerNotes : undefined,
-      });
-      
-      if (!updated) {
-        return res.status(404).json({ message: "Vote not found" });
-      }
-      
-      res.json(updated);
-    } catch (error) {
-      console.error("Error updating vote:", error);
-      res.status(500).json({ message: "Failed to update vote" });
-    }
-  });
+  // Edit a vote (correction from vote-history) — supersedes the prior vote via
+  // the same atomic create-or-supersede path as POST.
+  app.patch("/api/pairs/:id/vote", requireAuth, castVoteHandler);
 
   // ==================== ADMIN ROUTES ====================
 
