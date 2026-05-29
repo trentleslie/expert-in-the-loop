@@ -789,9 +789,9 @@ export class DatabaseStorage implements IStorage {
       if (!dataMatrix.has(v.pairId)) {
         dataMatrix.set(v.pairId, []);
       }
-      const score = v.scoringMode === "numeric" 
-        ? (v.scoreNumeric ?? 3) 
-        : (v.scoreBinary ? 1 : 0);
+      const score = v.scoringMode === "numeric"
+        ? (v.scoreNumeric ?? 3)
+        : (v.scoreBinary === "match" ? 1 : 0);
       dataMatrix.get(v.pairId)!.push(score);
     });
 
@@ -976,8 +976,9 @@ export class DatabaseStorage implements IStorage {
         if (v.scoreNumeric) numericScores.push(v.scoreNumeric);
       } else {
         binaryVotes++;
-        if (v.scoreBinary) matchVotes++;
-        else noMatchVotes++;
+        if (v.scoreBinary === "match") matchVotes++;
+        else if (v.scoreBinary === "no_match") noMatchVotes++;
+        // "unsure" is a binary vote but counts as neither match nor no_match
       }
       
       const dateStr = new Date(v.createdAt).toISOString().split('T')[0];
@@ -1254,8 +1255,9 @@ export class DatabaseStorage implements IStorage {
         pairVoteCounts.set(v.pairId, { positive: 0, negative: 0 });
       }
       const counts = pairVoteCounts.get(v.pairId)!;
-      if (v.scoreBinary) counts.positive++;
-      else counts.negative++;
+      if (v.scoreBinary === "match") counts.positive++;
+      else if (v.scoreBinary === "no_match") counts.negative++;
+      // "unsure" counts toward neither positive nor negative
     });
     
     const buckets = [
