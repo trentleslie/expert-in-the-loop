@@ -125,23 +125,20 @@ const RETRYABLE_CODES = new Set([
 ]);
 
 /**
- * Standalone recompute (its own transaction). Used by the bulk recompute path
- * (admin config edit). Sets a bounded lock_timeout and retries a few times on
- * serialization/deadlock so contention can't hang the request indefinitely.
+ * Run a transactional operation with bounded retry on transient Postgres
+ * contention errors (serialization failure, deadlock, lock_timeout / 55P03).
+ * Shared by the bulk recompute path AND the hot castVote path so neither fails
+ * a vote hard under concurrent activity on the same pair.
  */
-export async function recomputeAndPersistEvidenceStatus(
-  pairId: string,
-  config: CampaignConfig,
+export async function withTransactionRetry<T>(
+  fn: () => Promise<T>,
   maxRetries = 3,
-): Promise<EvidenceStatus> {
+): Promise<T> {
   let attempt = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
-      return await db.transaction(async (tx) => {
-        await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
-        return recomputeEvidenceStatusTx(tx, pairId, config);
-      });
+      return await fn();
     } catch (err) {
       const code = (err as { code?: string })?.code;
       if (code != null && RETRYABLE_CODES.has(code) && attempt < maxRetries) {
@@ -151,6 +148,22 @@ export async function recomputeAndPersistEvidenceStatus(
       throw err;
     }
   }
+}
+
+/**
+ * Standalone recompute (its own transaction). Used by the bulk recompute path
+ * (admin config edit). Bounded lock_timeout + retry so contention can't hang.
+ */
+export async function recomputeAndPersistEvidenceStatus(
+  pairId: string,
+  config: CampaignConfig,
+): Promise<EvidenceStatus> {
+  return withTransactionRetry(() =>
+    db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+      return recomputeEvidenceStatusTx(tx, pairId, config);
+    }),
+  );
 }
 
 /** Active (non-superseded) votes for a pair. */

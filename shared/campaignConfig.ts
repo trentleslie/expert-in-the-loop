@@ -78,33 +78,17 @@ const numericScoringSchema = z.object({
     }),
 });
 
-export const campaignConfigSchema = z.object({
+const campaignConfigBaseSchema = z.object({
   scoring: z.discriminatedUnion("mode", [binaryScoringSchema, numericScoringSchema]),
-  consensus: z
-    .object({
-      minVotes: z.number().int().min(1).default(2),
-      confirmPct: z.number().min(0).max(100).default(70),
-      rejectPct: z.number().min(0).max(100).default(70),
-      // Required when scoring.mode === "numeric"; validated at the call site.
-      numericConfirmThreshold: z.number().optional(),
-      numericRejectThreshold: z.number().optional(),
-    })
-    .superRefine((c, ctx) => {
-      // Inverted numeric thresholds make `disputed` unreachable (the confirm
-      // check runs first), silently turning every borderline pair into
-      // expert_confirmed. Reject at write time.
-      if (
-        c.numericConfirmThreshold != null &&
-        c.numericRejectThreshold != null &&
-        c.numericConfirmThreshold <= c.numericRejectThreshold
-      ) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "numericConfirmThreshold must be greater than numericRejectThreshold",
-          path: ["numericConfirmThreshold"],
-        });
-      }
-    }),
+  consensus: z.object({
+    minVotes: z.number().int().min(1).default(2),
+    confirmPct: z.number().min(0).max(100).default(70),
+    rejectPct: z.number().min(0).max(100).default(70),
+    // Required when scoring.mode === "numeric" — enforced by the top-level
+    // refinement below (where scoring.mode is in scope).
+    numericConfirmThreshold: z.number().optional(),
+    numericRejectThreshold: z.number().optional(),
+  }),
   display: z.object({
     showExternalLinks: z.boolean().default(false),
     linkTemplate: linkTemplateSchema.optional(),
@@ -115,6 +99,32 @@ export const campaignConfigSchema = z.object({
     sourcePrefixFilter: z.boolean().default(false),
     sourcePrefixes: z.array(z.string().max(64)).max(50).optional(),
   }),
+});
+
+/**
+ * Numeric campaigns MUST supply both numeric thresholds, and confirm must be
+ * strictly greater than reject. Validated at the top level (not on `consensus`)
+ * because both `scoring.mode` and `consensus` must be in scope:
+ *  - Missing thresholds on a numeric campaign would route every pair through the
+ *    engine's observable fallback, leaving everything stuck at `in_review`.
+ *  - Inverted thresholds make `disputed` unreachable (confirm check runs first).
+ */
+export const campaignConfigSchema = campaignConfigBaseSchema.superRefine((cfg, ctx) => {
+  if (cfg.scoring.mode !== "numeric") return;
+  const { numericConfirmThreshold, numericRejectThreshold } = cfg.consensus;
+  if (numericConfirmThreshold == null || numericRejectThreshold == null) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "numeric scoring requires numericConfirmThreshold and numericRejectThreshold",
+      path: ["consensus", "numericConfirmThreshold"],
+    });
+  } else if (numericConfirmThreshold <= numericRejectThreshold) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "numericConfirmThreshold must be greater than numericRejectThreshold",
+      path: ["consensus", "numericConfirmThreshold"],
+    });
+  }
 });
 
 export type CampaignConfig = z.infer<typeof campaignConfigSchema>;

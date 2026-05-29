@@ -15,7 +15,7 @@ import {
   type CampaignConfig,
   type EvidenceStatus,
 } from "@shared/campaignConfig";
-import { recomputeEvidenceStatusTx } from "./evidenceStatus";
+import { recomputeEvidenceStatusTx, withTransactionRetry } from "./evidenceStatus";
 import { db } from "./db";
 import { eq, and, sql, desc, count, not, inArray, lt, gte, between } from "drizzle-orm";
 
@@ -447,7 +447,10 @@ export class DatabaseStorage implements IStorage {
     voteData: Pick<InsertVote, "scoreBinary" | "scoreNumeric" | "scoringMode" | "expertSelectedCode" | "reviewerNotes">,
     config: CampaignConfig,
   ): Promise<{ vote: Vote; evidenceStatus: EvidenceStatus }> {
-    return db.transaction(async (tx) => {
+    // Bounded retry on transient contention (serialization/deadlock/lock_timeout)
+    // so a concurrent cast on the same pair doesn't drop the reviewer's vote.
+    return withTransactionRetry(() =>
+    db.transaction(async (tx) => {
       // Lock the pair row up front so concurrent casts on the same pair serialize.
       await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
       await tx.execute(sql`SELECT 1 FROM ${pairs} WHERE ${pairs.id} = ${pairId} FOR UPDATE`);
@@ -476,7 +479,8 @@ export class DatabaseStorage implements IStorage {
       // within the same transaction (re-locks the already-held pair row).
       const evidenceStatus = await recomputeEvidenceStatusTx(tx, pairId, config);
       return { vote: created, evidenceStatus };
-    });
+    }),
+    );
   }
 
   async getVotesByPair(pairId: string): Promise<Vote[]> {
