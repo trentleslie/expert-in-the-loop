@@ -806,6 +806,7 @@ function SkipAnalysisSection({ data }: { data: SkipAnalysis }) {
 
 export default function AnalyticsDashboard() {
   const [selectedCampaign, setSelectedCampaign] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState("overview");
   
   const { data: campaigns, isLoading: campaignsLoading } = useQuery<CampaignSummary[]>({
     queryKey: ["/api/analytics/campaigns"],
@@ -824,23 +825,27 @@ export default function AnalyticsDashboard() {
     queryKey: ["/api/analytics/votes-over-time"],
   });
   
+  // Single-string keys hit the per-campaign DETAIL endpoints. These previously
+  // used ["/api/analytics/campaigns", id, "<section>"] with no queryFn, so the
+  // default getQueryFn fetched queryKey[0] (/api/analytics/campaigns, the list)
+  // and these sections rendered blank — the root cause of finding #12.
   const { data: voteDistribution, isLoading: votesLoading } = useQuery<VoteDistribution>({
-    queryKey: ["/api/analytics/campaigns", selectedCampaign, "votes"],
+    queryKey: [`/api/analytics/campaigns/${selectedCampaign}/votes`],
     enabled: !!selectedCampaign,
   });
-  
+
   const { data: reviewerStats, isLoading: reviewersLoading } = useQuery<ReviewerStat[]>({
-    queryKey: ["/api/analytics/campaigns", selectedCampaign, "reviewers"],
+    queryKey: [`/api/analytics/campaigns/${selectedCampaign}/reviewers`],
     enabled: !!selectedCampaign,
   });
-  
+
   const { data: disagreements, isLoading: disagreementsLoading } = useQuery<DisagreementData>({
-    queryKey: ["/api/analytics/campaigns", selectedCampaign, "disagreements"],
+    queryKey: [`/api/analytics/campaigns/${selectedCampaign}/disagreements`],
     enabled: !!selectedCampaign,
   });
-  
+
   const { data: skipAnalysis, isLoading: skipsLoading } = useQuery<SkipAnalysis>({
-    queryKey: ["/api/analytics/campaigns", selectedCampaign, "skips"],
+    queryKey: [`/api/analytics/campaigns/${selectedCampaign}/skips`],
     enabled: !!selectedCampaign,
   });
 
@@ -859,7 +864,7 @@ export default function AnalyticsDashboard() {
           </div>
         </div>
         
-        <Tabs defaultValue="overview" className="space-y-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList>
             <TabsTrigger value="overview" data-testid="tab-overview">
               <BarChart3 className="w-4 h-4 mr-2" />
@@ -940,10 +945,7 @@ export default function AnalyticsDashboard() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => {
-                      const tab = document.querySelector('[data-testid="tab-campaign"]');
-                      if (tab) (tab as HTMLElement).click();
-                    }}
+                    onClick={() => setActiveTab("campaign")}
                     data-testid="button-view-details"
                   >
                     View Details

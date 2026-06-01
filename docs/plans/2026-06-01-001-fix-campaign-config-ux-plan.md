@@ -280,7 +280,7 @@ The one cross-phase dependency: Unit 7 introduces `scoringLabels.ts`, which Unit
 
 **Verification:** Findings #6, #14 cleared; "0/0 but Disputed" no longer possible.
 
-- [ ] **Unit 6: Analytics page repair (#12)**
+- [x] **Unit 6: Analytics page repair (#12)** — ✅ shipped (root cause was the queryFn footgun)
 
 **Goal:** Repair the existing Analytics page — View Details navigates, Reviewers/Disagreements tabs render their data, skip stats show `0`, tier bar fills width.
 
