@@ -200,6 +200,9 @@ function EditVoteDialog({
       });
       queryClient.invalidateQueries({ queryKey: ["/api/users/me/votes"] });
       queryClient.invalidateQueries({ queryKey: ["/api/users/me/stats"] });
+      // Editing a vote re-tiers the pair — refresh the results browser + home
+      // progress (they prefix-match ["/api/campaigns"]) so they don't go stale (#11).
+      queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
       onClose();
     },
     onError: (error: Error) => {

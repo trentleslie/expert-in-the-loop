@@ -339,7 +339,7 @@ The one cross-phase dependency: Unit 7 introduces `scoringLabels.ts`, which Unit
 
 **Verification:** Findings #7, #10, #4 cleared.
 
-- [ ] **Unit 8: Stale-data invalidation across lists (#11)**
+- [x] **Unit 8: Stale-data invalidation across lists (#11)** — ✅ shipped
 
 **Goal:** Vote-history, review queue, results, and campaign lists reflect changes without a manual refresh.
 

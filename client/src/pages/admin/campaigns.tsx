@@ -754,6 +754,10 @@ export default function AdminCampaigns() {
 
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
+    // Status/config/archive changes re-tier evidence and gate voting — refresh
+    // the reviewer-facing lists too so they don't show stale state (#11).
+    queryClient.invalidateQueries({ queryKey: ["/api/users/me/votes"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/users/me/stats"] });
   };
 
   const groupedCampaigns = {

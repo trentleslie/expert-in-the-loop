@@ -784,6 +784,12 @@ export default function UploadPage() {
       queryClientHook.invalidateQueries({
         queryKey: [`/api/campaigns/${campaignId}`],
       });
+      // Newly imported pairs must appear in the review queue — invalidate the
+      // campaign's next-pair query (prefix match) so review isn't stuck on a
+      // stale empty result after import (#11).
+      queryClientHook.invalidateQueries({
+        queryKey: [`/api/campaigns/${campaignId}/next-pair`],
+      });
     } catch (err: any) {
       const message =
         err?.message || "An unexpected error occurred during import.";

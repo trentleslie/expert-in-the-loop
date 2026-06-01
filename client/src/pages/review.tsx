@@ -397,6 +397,9 @@ export default function ReviewPage() {
       });
       refetchPair();
       queryClient.invalidateQueries({ queryKey: ["/api/users/me/stats"] });
+      // Casting a vote can re-tier the pair — refresh campaign progress (home)
+      // and the results browser, which prefix-match ["/api/campaigns"] (#11).
+      queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
     },
     onError: () => {
       toast({
