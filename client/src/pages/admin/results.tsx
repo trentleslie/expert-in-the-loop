@@ -87,6 +87,32 @@ type PairDetails = {
   skipCount: number;
 };
 
+/**
+ * Renders a pair's jsonb metadata as badges. Values are rendered as React text
+ * nodes (never HTML) — imported metadata can contain XSS payloads like
+ * `<img onerror=...>` / `<script>` and must stay inert.
+ */
+function MetadataBadges({ metadata }: { metadata: unknown }) {
+  if (!metadata || typeof metadata !== "object") return null;
+  const entries = Object.entries(metadata as Record<string, unknown>).filter(
+    ([, v]) => v !== "" && v != null,
+  );
+  if (entries.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1 mt-2">
+      {entries.map(([key, value]) => (
+        <Badge
+          key={key}
+          variant="secondary"
+          className="text-xs max-w-full break-words whitespace-normal font-normal"
+        >
+          {key}: {String(value)}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
 function SortIcon({
   field,
   sortField,
@@ -260,6 +286,7 @@ function PairDetailDialog({
                 <p className="text-xs font-mono text-muted-foreground mt-2">
                   ID: {data.pair.sourceId}
                 </p>
+                <MetadataBadges metadata={data.pair.sourceMetadata} />
               </div>
               <div className="p-4 rounded-lg bg-muted/50">
                 <p className="text-xs text-muted-foreground mb-1">TARGET</p>
@@ -281,6 +308,7 @@ function PairDetailDialog({
                     data.pair.targetId
                   )}
                 </p>
+                <MetadataBadges metadata={data.pair.targetMetadata} />
               </div>
             </div>
 
@@ -775,10 +803,20 @@ export default function ResultsBrowserPage() {
                           </p>
                         </TableCell>
                         <TableCell className="text-center">
-                          <div className="flex items-center justify-center gap-1 text-sm">
-                            <span className="text-green-600">{row.positiveVotes}</span>
-                            <span>/</span>
+                          {/* reject / unsure / accept — matches the review buttons
+                              (No Match · Unsure · Match). Unsure is derived since
+                              /results returns only positive/negative counts. */}
+                          <div
+                            className="flex items-center justify-center gap-1 text-sm tabular-nums"
+                            title="reject / unsure / accept"
+                          >
                             <span className="text-red-600">{row.negativeVotes}</span>
+                            <span className="text-muted-foreground">/</span>
+                            <span className="text-foreground">
+                              {Math.max(0, row.voteCount - row.positiveVotes - row.negativeVotes)}
+                            </span>
+                            <span className="text-muted-foreground">/</span>
+                            <span className="text-green-600">{row.positiveVotes}</span>
                           </div>
                         </TableCell>
                         <TableCell className="text-center text-sm text-muted-foreground">

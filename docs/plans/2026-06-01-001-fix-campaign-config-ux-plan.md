@@ -255,7 +255,7 @@ The one cross-phase dependency: Unit 7 introduces `scoringLabels.ts`, which Unit
 
 **Verification:** Findings #1, #13 cleared; note §2/§3 satisfied.
 
-- [ ] **Unit 5: Results browser — three-count votes column + detail-dialog metadata (#6, #14)**
+- [x] **Unit 5: Results browser — three-count votes column + detail-dialog metadata (#6, #14)** — ✅ shipped
 
 **Goal:** Votes column shows reject/unsure/accept (red/neutral/green); PairDetailDialog renders source/target metadata.
 
