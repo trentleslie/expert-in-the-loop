@@ -146,7 +146,9 @@ function CampaignTypeCombobox({ value, onChange }: { value: string; onChange: (v
 function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
   const [open, setOpen] = useState(false);
   const [config, setConfig] = useState<CampaignConfig>(DEFAULT_CAMPAIGN_CONFIG);
-  const [configOpen, setConfigOpen] = useState(false);
+  // Open by default on create so the (now self-describing) config sections are
+  // visible without a click — admins configure infrequently (finding #5 follow-up).
+  const [configOpen, setConfigOpen] = useState(true);
   const { toast } = useToast();
 
   const form = useForm<CreateCampaignForm>({
@@ -167,7 +169,7 @@ function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
       setOpen(false);
       form.reset();
       setConfig(DEFAULT_CAMPAIGN_CONFIG);
-      setConfigOpen(false);
+      setConfigOpen(true);
       onSuccess();
     },
     onError: () => {

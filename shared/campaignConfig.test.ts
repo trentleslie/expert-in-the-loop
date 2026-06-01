@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { campaignConfigSchema, DEFAULT_CAMPAIGN_CONFIG } from "./campaignConfig";
+import { campaignConfigSchema, DEFAULT_CAMPAIGN_CONFIG, defaultNumericThresholds } from "./campaignConfig";
 
 describe("campaignConfigSchema", () => {
   it("accepts the default (binary) config", () => {
@@ -61,6 +61,33 @@ describe("campaignConfigSchema", () => {
     const cfg = {
       ...DEFAULT_CAMPAIGN_CONFIG,
       display: { ...DEFAULT_CAMPAIGN_CONFIG.display, showExternalLinks: true, linkTemplate: "https://loinc.org/{targetId}" },
+    };
+    expect(campaignConfigSchema.safeParse(cfg).success).toBe(true);
+  });
+});
+
+describe("defaultNumericThresholds", () => {
+  it.each([
+    [1, 5],
+    [1, 10],
+    [1, 100],
+    [1, 3], // mid-span that would otherwise collide on rounding
+    [1, 2],
+    [0, 4],
+  ])("returns reject < confirm within [%i, %i]", (min, max) => {
+    const { numericConfirmThreshold: confirm, numericRejectThreshold: reject } =
+      defaultNumericThresholds(min, max);
+    expect(reject).toBeGreaterThanOrEqual(min);
+    expect(confirm).toBeLessThanOrEqual(max);
+    expect(confirm).toBeGreaterThan(reject);
+  });
+
+  it("produces a config the schema accepts for numeric scoring", () => {
+    const thresholds = defaultNumericThresholds(1, 5);
+    const cfg = {
+      ...DEFAULT_CAMPAIGN_CONFIG,
+      scoring: { mode: "numeric" as const, numeric: { min: 1, max: 5 } },
+      consensus: { ...DEFAULT_CAMPAIGN_CONFIG.consensus, ...thresholds },
     };
     expect(campaignConfigSchema.safeParse(cfg).success).toBe(true);
   });

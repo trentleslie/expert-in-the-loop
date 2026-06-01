@@ -228,7 +228,7 @@ The one cross-phase dependency: Unit 7 introduces `scoringLabels.ts`, which Unit
 
 **Verification:** Checklist §2 slider/links/confidence items flip to pass; finding #2 and #3 cleared.
 
-- [ ] **Unit 4: Config-editor UX polish — default-open, descriptions, minVotes warning, numeric defaults (#1, #13; note §2, §3)**
+- [x] **Unit 4: Config-editor UX polish — default-open, descriptions, minVotes warning, numeric defaults (#1, #13; note §2, §3)** — ✅ shipped
 
 **Goal:** On create, the config editor is open with one-line section descriptions; a warning shows when `minVotes ≥ 2`; numeric thresholds have sensible defaults.
 
