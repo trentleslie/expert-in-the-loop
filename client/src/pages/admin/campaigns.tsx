@@ -54,7 +54,7 @@ import {
   Search,
   Settings,
   ChevronDown,
-  ChevronRight,
+  ChevronUp,
   AlertTriangle,
   CheckCircle2,
 } from "lucide-react";
@@ -289,7 +289,7 @@ function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
                     <Settings className="w-4 h-4" />
                     Configure scoring &amp; display
                   </span>
-                  {configOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  {configOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
               </CollapsibleTrigger>
               <CollapsibleContent className="p-3 pt-0">

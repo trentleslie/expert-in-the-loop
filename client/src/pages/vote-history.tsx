@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,6 +16,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient as qc } from "@/lib/queryClient";
+import { binaryVoteLabel, numericVoteLabel } from "@/lib/scoringLabels";
+import type { CampaignConfig } from "@shared/campaignConfig";
 import {
   ArrowLeft,
   ThumbsUp,
@@ -41,9 +43,11 @@ function formatDate(date: Date | string) {
 
 function VoteCard({
   vote,
+  scoring,
   onEdit,
 }: {
   vote: VoteWithPair;
+  scoring?: CampaignConfig["scoring"];
   onEdit: (vote: VoteWithPair) => void;
 }) {
   const isLoinc = vote.pair.targetDataset?.toUpperCase() === "LOINC";
@@ -61,22 +65,22 @@ function VoteCard({
                 vote.scoreBinary === "match" ? (
                   <Badge className="bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20">
                     <ThumbsUp className="w-3 h-3 mr-1" />
-                    Confirmed
+                    {binaryVoteLabel(scoring, "match")}
                   </Badge>
                 ) : vote.scoreBinary === "unsure" ? (
                   <Badge className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20">
                     <HelpCircle className="w-3 h-3 mr-1" />
-                    Unsure
+                    {binaryVoteLabel(scoring, "unsure")}
                   </Badge>
                 ) : (
                   <Badge className="bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20">
                     <ThumbsDown className="w-3 h-3 mr-1" />
-                    Rejected
+                    {binaryVoteLabel(scoring, "no_match")}
                   </Badge>
                 )
               ) : (
                 <Badge variant="secondary">
-                  Score: {vote.scoreNumeric}/5
+                  Score: {vote.scoreNumeric != null ? numericVoteLabel(scoring, vote.scoreNumeric) : "—"}
                 </Badge>
               )}
               <span className="text-xs text-muted-foreground">
@@ -147,10 +151,12 @@ function VoteCard({
 
 function EditVoteDialog({
   vote,
+  scoring,
   open,
   onClose,
 }: {
   vote: VoteWithPair | null;
+  scoring?: CampaignConfig["scoring"];
   open: boolean;
   onClose: () => void;
 }) {
@@ -240,7 +246,7 @@ function EditVoteDialog({
                   data-testid="button-edit-no-match"
                 >
                   <ThumbsDown className="w-4 h-4 mr-2" />
-                  Reject
+                  {binaryVoteLabel(scoring, "no_match")}
                 </Button>
                 <Button
                   variant={scoreBinary === "unsure" ? "default" : "outline"}
@@ -249,7 +255,7 @@ function EditVoteDialog({
                   data-testid="button-edit-unsure"
                 >
                   <HelpCircle className="w-4 h-4 mr-2" />
-                  Unsure
+                  {binaryVoteLabel(scoring, "unsure")}
                 </Button>
                 <Button
                   variant={scoreBinary === "match" ? "default" : "outline"}
@@ -258,7 +264,7 @@ function EditVoteDialog({
                   data-testid="button-edit-yes-match"
                 >
                   <ThumbsUp className="w-4 h-4 mr-2" />
-                  Confirm
+                  {binaryVoteLabel(scoring, "match")}
                 </Button>
               </div>
             </div>
@@ -319,6 +325,19 @@ export default function VoteHistoryPage() {
   const { data: votes, isLoading, isError } = useQuery<VoteWithPair[]>({
     queryKey: ["/api/users/me/votes"],
   });
+
+  // Vote history spans multiple campaigns; fetch their configs so each vote is
+  // labelled with its own campaign's scoring labels (not hardcoded tier words).
+  const { data: campaigns } = useQuery<{ id: string; config: CampaignConfig | null }[]>({
+    queryKey: ["/api/campaigns"],
+  });
+  const scoringByCampaign = useMemo(() => {
+    const map = new Map<string, CampaignConfig["scoring"]>();
+    campaigns?.forEach((c) => {
+      if (c.config) map.set(c.id, c.config.scoring);
+    });
+    return map;
+  }, [campaigns]);
 
   if (isLoading) {
     return (
@@ -396,6 +415,7 @@ export default function VoteHistoryPage() {
               <VoteCard
                 key={vote.id}
                 vote={vote}
+                scoring={scoringByCampaign.get(vote.pair.campaignId)}
                 onEdit={setEditingVote}
               />
             ))}
@@ -405,6 +425,7 @@ export default function VoteHistoryPage() {
 
       <EditVoteDialog
         vote={editingVote}
+        scoring={editingVote ? scoringByCampaign.get(editingVote.pair.campaignId) : undefined}
         open={!!editingVote}
         onClose={() => setEditingVote(null)}
       />

@@ -308,7 +308,7 @@ The one cross-phase dependency: Unit 7 introduces `scoringLabels.ts`, which Unit
 
 **Verification:** Finding #12 sub-items cleared; checklist §6 analytics item flips to pass.
 
-- [ ] **Unit 7: Scoring-label helper + ordering + chevron consistency (#7, #10, #4)**
+- [x] **Unit 7: Scoring-label helper + ordering + chevron consistency (#7, #10, #4)** — ✅ shipped
 
 **Goal:** One config-derived source of vote-choice labels used everywhere; negative→neutral→positive ordering app-wide; a single disclosure-chevron convention.
 

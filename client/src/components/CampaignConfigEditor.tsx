@@ -9,7 +9,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { ChevronDown, ChevronRight, Plus, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Plus, X } from "lucide-react";
 import { ScoringControls } from "@/components/ScoringControls";
 import { campaignConfigSchema, defaultNumericThresholds, type CampaignConfig } from "@shared/campaignConfig";
 
@@ -68,7 +68,7 @@ function CollapsibleSection({
           data-testid={`config-section-${testid}`}
         >
           <SectionHeading>{title}</SectionHeading>
-          {open ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+          {open ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent className="px-3 pb-3 space-y-3">
@@ -207,23 +207,8 @@ export function CampaignConfigEditor({
           </SectionDescription>
           {mode === "binary" ? (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="space-y-1">
-                <Label htmlFor="label-positive">Positive</Label>
-                <Input
-                  id="label-positive"
-                  value={(value.scoring as BinaryScoring).binary.labels.positive}
-                  onChange={(e) =>
-                    setScoring({
-                      mode: "binary",
-                      binary: {
-                        labels: { ...(value.scoring as BinaryScoring).binary.labels, positive: e.target.value },
-                      },
-                    })
-                  }
-                  data-testid="input-label-positive"
-                />
-                <FieldError k="scoring.binary.labels.positive" />
-              </div>
+              {/* negative → neutral → positive, matching the review buttons
+                  (No Match · Unsure · Match) and the results votes column. */}
               <div className="space-y-1">
                 <Label htmlFor="label-negative">Negative</Label>
                 <Input
@@ -257,6 +242,23 @@ export function CampaignConfigEditor({
                   data-testid="input-label-neutral"
                 />
                 <FieldError k="scoring.binary.labels.neutral" />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="label-positive">Positive</Label>
+                <Input
+                  id="label-positive"
+                  value={(value.scoring as BinaryScoring).binary.labels.positive}
+                  onChange={(e) =>
+                    setScoring({
+                      mode: "binary",
+                      binary: {
+                        labels: { ...(value.scoring as BinaryScoring).binary.labels, positive: e.target.value },
+                      },
+                    })
+                  }
+                  data-testid="input-label-positive"
+                />
+                <FieldError k="scoring.binary.labels.positive" />
               </div>
             </div>
           ) : (
