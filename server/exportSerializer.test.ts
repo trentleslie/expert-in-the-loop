@@ -65,7 +65,7 @@ const CANONICAL_FIELDS = [
   "evidence_status", "resolution_layer", "llm_confidence", "llm_model",
   "active_vote_count", "total_vote_count",
   "positive_votes", "negative_votes", "unsure_votes",
-  "positive_rate", "expert_selections", "reviewer_notes",
+  "positive_rate", "mean_score", "expert_selections", "reviewer_notes",
 ];
 
 describe("buildExportRows", () => {
@@ -83,6 +83,28 @@ describe("buildExportRows", () => {
     expect(rows[0].resolution_layer).toBe("ai_assisted");
     expect(rows[0].positive_votes).toBe(1);
     expect(rows[0].positive_rate).toBe("1.000");
+  });
+
+  it("numeric campaign: binary counts 0, positive_rate N/A (not 0.000), mean_score set", () => {
+    const rows = buildExportRows([
+      item({
+        pair: pair({ evidenceStatus: "expert_confirmed" }),
+        votes: [
+          vote(null, { scoreNumeric: 4, scoringMode: "numeric" }),
+          vote(null, { scoreNumeric: 2, scoringMode: "numeric" }),
+        ],
+        positiveRate: 0, // storage would report 0/N here — must NOT surface as "0.000"
+        totalVoteCount: 2,
+      }),
+    ]);
+    expect(rows[0]).toMatchObject({
+      active_vote_count: 2,
+      positive_votes: 0,
+      negative_votes: 0,
+      unsure_votes: 0,
+      positive_rate: "",
+      mean_score: "3.000",
+    });
   });
 
   it("counts an unsure-only pair as 0/0/1 (the table-vs-export consistency case)", () => {

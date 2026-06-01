@@ -49,40 +49,60 @@ export type ExportRow = {
   positive_votes: number;
   negative_votes: number;
   unsure_votes: number;
+  // Binary agreement rate; "" (N/A) for numeric campaigns.
   positive_rate: string;
+  // Mean of numeric scores; "" for binary campaigns.
+  mean_score: string;
   expert_selections: string;
   reviewer_notes: string;
 };
 
 export function buildExportRows(exportData: ExportItem[]): ExportRow[] {
-  return exportData.map((item) => ({
-    pair_id: item.pair.id,
-    source_text: item.pair.sourceText,
-    source_dataset: item.pair.sourceDataset,
-    source_id: item.pair.sourceId,
-    target_text: item.pair.targetText,
-    target_dataset: item.pair.targetDataset,
-    target_id: item.pair.targetId,
-    // Stored, engine-computed status + provenance — every format carries these.
-    evidence_status: item.pair.evidenceStatus,
-    resolution_layer: item.pair.resolutionLayer,
-    llm_confidence: item.pair.llmConfidence,
-    llm_model: item.pair.llmModel,
-    active_vote_count: item.votes.length,
-    total_vote_count: item.totalVoteCount,
-    positive_votes: item.votes.filter((v) => v.scoreBinary === "match").length,
-    negative_votes: item.votes.filter((v) => v.scoreBinary === "no_match").length,
-    unsure_votes: item.votes.filter((v) => v.scoreBinary === "unsure").length,
-    positive_rate: item.positiveRate !== null ? item.positiveRate.toFixed(3) : "",
-    expert_selections: item.votes
-      .filter((v) => v.expertSelectedCode)
-      .map((v) => v.expertSelectedCode)
-      .join("; "),
-    reviewer_notes: item.votes
-      .filter((v) => v.reviewerNotes)
-      .map((v) => v.reviewerNotes)
-      .join(" | "),
-  }));
+  return exportData.map((item) => {
+    const positive = item.votes.filter((v) => v.scoreBinary === "match").length;
+    const negative = item.votes.filter((v) => v.scoreBinary === "no_match").length;
+    const unsure = item.votes.filter((v) => v.scoreBinary === "unsure").length;
+    const binaryTotal = positive + negative + unsure;
+    const numericScores = item.votes
+      .map((v) => v.scoreNumeric)
+      .filter((s): s is number => s != null);
+
+    return {
+      pair_id: item.pair.id,
+      source_text: item.pair.sourceText,
+      source_dataset: item.pair.sourceDataset,
+      source_id: item.pair.sourceId,
+      target_text: item.pair.targetText,
+      target_dataset: item.pair.targetDataset,
+      target_id: item.pair.targetId,
+      // Stored, engine-computed status + provenance — every format carries these.
+      evidence_status: item.pair.evidenceStatus,
+      resolution_layer: item.pair.resolutionLayer,
+      llm_confidence: item.pair.llmConfidence,
+      llm_model: item.pair.llmModel,
+      active_vote_count: item.votes.length,
+      total_vote_count: item.totalVoteCount,
+      positive_votes: positive,
+      negative_votes: negative,
+      unsure_votes: unsure,
+      // Computed from BINARY votes only — empty (N/A) for numeric campaigns,
+      // not a misleading "0.000". (For binary campaigns binaryTotal == vote
+      // count, so this matches the prior positiveRate exactly.)
+      positive_rate: binaryTotal > 0 ? (positive / binaryTotal).toFixed(3) : "",
+      // Numeric campaigns: the mean of scored values (binary fields stay 0).
+      mean_score: numericScores.length
+        ? (numericScores.reduce((a, b) => a + b, 0) / numericScores.length).toFixed(3)
+        : "",
+      expert_selections: item.votes
+        .filter((v) => v.expertSelectedCode)
+        .map((v) => v.expertSelectedCode)
+        .join("; "),
+      reviewer_notes: item.votes
+        .filter((v) => v.reviewerNotes)
+        .map((v) => v.reviewerNotes)
+        .join(" | "),
+    };
+  });
 }
 
 // Neutralize CSV/spreadsheet formula injection: any string cell starting with
