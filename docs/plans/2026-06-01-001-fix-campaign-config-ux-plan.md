@@ -132,7 +132,7 @@ The one cross-phase dependency: Unit 7 introduces `scoringLabels.ts`, which Unit
 
 ## Implementation Units
 
-- [ ] **Unit 1: Fix config-edit clobber (#5)**
+- [x] **Unit 1: Fix config-edit clobber (#5)** — ✅ shipped (commit `0f21dec`)
 
 **Goal:** The Configure-campaign dialog loads the campaign's *saved* config; saving never reverts unedited fields to defaults.
 
@@ -160,7 +160,7 @@ The one cross-phase dependency: Unit 7 introduces `scoringLabels.ts`, which Unit
 
 **Verification:** Re-running the finding-#5 repro on dev shows the editor pre-populated with saved config and a one-field save that does not wipe siblings.
 
-- [ ] **Unit 2: Unify exports server-side + TSV + complete JSON (#8, #9)**
+- [x] **Unit 2: Unify exports server-side + TSV + complete JSON (#8, #9)** — ✅ shipped
 
 **Goal:** One server endpoint serves csv | tsv | json from the same canonical rows; JSON gains the dropped fields; TSV added; client JSON builder removed.
 

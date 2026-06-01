@@ -3,7 +3,14 @@ import { createServer, type Server } from "http";
 import { getAuth, clerkClient } from "@clerk/express";
 import multer from "multer";
 import { parse } from "csv-parse/sync";
-import { stringify } from "csv-stringify/sync";
+import {
+  EXPORT_FORMATS,
+  isExportFormat,
+  buildExportRows,
+  serializeExport,
+  exportContentType,
+  exportFilename,
+} from "./exportSerializer";
 import { storage } from "./storage";
 import { requireAuth, requireAdmin } from "./auth";
 import { insertCampaignSchema, insertVoteSchema, type InsertPair } from "@shared/schema";
@@ -482,45 +489,29 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Campaign not found" });
       }
 
+      // Format is an allowlisted query param; default csv. All formats export
+      // the WHOLE campaign (on-screen filters are not applied to exports) and
+      // share one serializer so field coverage can't drift across formats.
+      const format = req.query.format ?? "csv";
+      if (!isExportFormat(format)) {
+        return res
+          .status(400)
+          .json({ message: `Invalid format. Allowed: ${EXPORT_FORMATS.join(", ")}.` });
+      }
+
       const exportData = await storage.getCampaignExportData(campaignId);
-
-      const csvData = exportData.map((item) => ({
-        pair_id: item.pair.id,
-        source_text: item.pair.sourceText,
-        source_dataset: item.pair.sourceDataset,
-        source_id: item.pair.sourceId,
-        target_text: item.pair.targetText,
-        target_dataset: item.pair.targetDataset,
-        target_id: item.pair.targetId,
-        // Stored, engine-computed status + provenance (R12/R15) — replaces the
-        // old ad-hoc 0.5-threshold consensus column.
-        evidence_status: item.pair.evidenceStatus,
-        resolution_layer: item.pair.resolutionLayer,
-        llm_confidence: item.pair.llmConfidence,
-        llm_model: item.pair.llmModel,
-        active_vote_count: item.votes.length,
-        total_vote_count: item.totalVoteCount,
-        positive_votes: item.votes.filter((v) => v.scoreBinary === "match").length,
-        negative_votes: item.votes.filter((v) => v.scoreBinary === "no_match").length,
-        unsure_votes: item.votes.filter((v) => v.scoreBinary === "unsure").length,
-        positive_rate: item.positiveRate !== null ? item.positiveRate.toFixed(3) : "",
-        expert_selections: item.votes.filter(v => v.expertSelectedCode).map(v => v.expertSelectedCode).join("; "),
-        reviewer_notes: item.votes.filter(v => v.reviewerNotes).map(v => v.reviewerNotes).join(" | "),
-      }));
-
-      const csv = stringify(csvData, {
-        header: true,
-        // Neutralize CSV/spreadsheet formula injection: any string cell starting
-        // with =, +, -, @, tab, or CR is prefixed with a single quote. Metadata
-        // and free-text come from imported CSVs and reach BioMapper/RoP operators.
-        cast: {
-          string: (value) => (/^[=+\-@\t\r]/.test(value) ? `'${value}` : value),
-        },
+      const rows = buildExportRows(exportData);
+      const body = serializeExport(rows, format, {
+        campaignName: campaign.name,
+        exportedAt: new Date().toISOString(),
       });
-      
-      res.setHeader("Content-Type", "text/csv");
-      res.setHeader("Content-Disposition", `attachment; filename="${campaign.name.replace(/\s+/g, "_")}_export.csv"`);
-      res.send(csv);
+
+      res.setHeader("Content-Type", exportContentType(format));
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${exportFilename(campaign.name, format)}"`,
+      );
+      res.send(body);
     } catch (error) {
       console.error("Error exporting campaign:", error);
       res.status(500).json({ message: "Failed to export campaign" });

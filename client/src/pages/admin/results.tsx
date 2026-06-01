@@ -386,7 +386,7 @@ export default function ResultsBrowserPage() {
   const [selectedPairId, setSelectedPairId] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [exportFormat, setExportFormat] = useState<"csv" | "json">("csv");
+  const [exportFormat, setExportFormat] = useState<"csv" | "tsv" | "json">("csv");
   const [isExporting, setIsExporting] = useState(false);
 
   // Multi-select evidence-tier filter, initialized from the URL so a filtered
@@ -523,70 +523,22 @@ export default function ResultsBrowserPage() {
     setPage(1);
   };
 
+  // All formats (csv/tsv/json) are served by the single server-side serializer
+  // — the client no longer hand-rolls JSON (which used to drop evidence_status,
+  // resolution_layer, unsure_votes, etc). Exports are always the whole campaign.
   const handleExport = async () => {
     if (!campaignId) return;
     setIsExporting(true);
     try {
-      if (exportFormat === "csv") {
-        const res = await fetch(`/api/campaigns/${campaignId}/export`);
-        if (!res.ok) throw new Error("Export failed");
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${campaign?.name?.replace(/\s+/g, "_") ?? "export"}_export.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
-      } else {
-        const allPairs: PairResult[] = [];
-        let currentPage = 1;
-        let totalPages = 1;
-        do {
-          const params = new URLSearchParams({ page: currentPage.toString(), limit: "100" });
-          if (search) params.set("search", search);
-          if (consensus !== "all") params.set("consensus", consensus);
-          if (minVotes !== undefined) params.set("minVotes", minVotes.toString());
-          if (maxVotes !== undefined) params.set("maxVotes", maxVotes.toString());
-          const res = await fetch(`/api/campaigns/${campaignId}/results?${params}`);
-          if (!res.ok) throw new Error("Failed to fetch results for JSON export");
-          const data: ResultsResponse = await res.json();
-          allPairs.push(...data.pairs);
-          totalPages = data.totalPages;
-          currentPage++;
-        } while (currentPage <= totalPages);
-
-        const jsonContent = JSON.stringify(
-          {
-            campaign: campaign?.name ?? campaignId,
-            exportedAt: new Date().toISOString(),
-            total: allPairs.length,
-            pairs: allPairs.map((row) => ({
-              pair_id: row.pair.id,
-              source_text: row.pair.sourceText,
-              source_dataset: row.pair.sourceDataset,
-              source_id: row.pair.sourceId,
-              target_text: row.pair.targetText,
-              target_dataset: row.pair.targetDataset,
-              target_id: row.pair.targetId,
-              llm_confidence: row.pair.llmConfidence,
-              llm_model: row.pair.llmModel,
-              vote_count: row.voteCount,
-              positive_votes: row.positiveVotes,
-              negative_votes: row.negativeVotes,
-              positive_rate: row.positiveRate,
-            })),
-          },
-          null,
-          2
-        );
-        const blob = new Blob([jsonContent], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${campaign?.name?.replace(/\s+/g, "_") ?? "export"}_export.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
+      const res = await fetch(`/api/campaigns/${campaignId}/export?format=${exportFormat}`);
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${campaign?.name?.replace(/\s+/g, "_") ?? "export"}_export.${exportFormat}`;
+      a.click();
+      URL.revokeObjectURL(url);
     } catch (err) {
       console.error("Export error:", err);
     } finally {
@@ -890,13 +842,14 @@ export default function ResultsBrowserPage() {
         <div className="flex items-center justify-end gap-2">
           <Select
             value={exportFormat}
-            onValueChange={(v) => setExportFormat(v as "csv" | "json")}
+            onValueChange={(v) => setExportFormat(v as "csv" | "tsv" | "json")}
           >
             <SelectTrigger className="w-28" data-testid="select-export-format">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="csv">CSV</SelectItem>
+              <SelectItem value="tsv">TSV</SelectItem>
               <SelectItem value="json">JSON</SelectItem>
             </SelectContent>
           </Select>
