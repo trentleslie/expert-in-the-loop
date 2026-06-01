@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { ThumbsUp, ThumbsDown, HelpCircle, Loader2 } from "lucide-react";
@@ -134,17 +135,42 @@ function NumericControls({
     );
   }
 
-  // Large range: slider. Default to min until the reviewer moves it.
-  const current = value ?? min;
+  // Large range: slider. Track the dragged value locally and only COMMIT the
+  // vote on release (onValueCommit) — wiring onValueChange straight to onSelect
+  // re-fired the confirmation dialog on every drag tick (finding #15). Reset to
+  // the parent's value when it changes (e.g. after a vote resets the form).
+  return <NumericSlider min={min} max={max} labelFor={labelFor} value={value} onSelect={onSelect} isSubmitting={isSubmitting} />;
+}
+
+function NumericSlider({
+  min,
+  max,
+  labelFor,
+  value,
+  onSelect,
+  isSubmitting,
+}: {
+  min: number;
+  max: number;
+  labelFor: (n: number) => string | undefined;
+  value?: number | null;
+  onSelect: (value: number) => void;
+  isSubmitting?: boolean;
+}) {
+  const [pending, setPending] = useState<number>(value ?? min);
+  useEffect(() => {
+    setPending(value ?? min);
+  }, [value, min]);
+
   return (
     <div className="space-y-4 max-w-xl mx-auto px-2">
       <div className="flex items-center justify-center gap-3">
         <span className="text-3xl font-semibold tabular-nums" data-testid="numeric-slider-value">
-          {current}
+          {pending}
         </span>
-        {labelFor(current) && (
+        {labelFor(pending) && (
           <span className="text-sm text-muted-foreground" data-testid="numeric-slider-label">
-            {labelFor(current)}
+            {labelFor(pending)}
           </span>
         )}
       </div>
@@ -152,8 +178,9 @@ function NumericControls({
         min={min}
         max={max}
         step={1}
-        value={[current]}
-        onValueChange={(vals) => onSelect(vals[0])}
+        value={[pending]}
+        onValueChange={(vals) => setPending(vals[0])}
+        onValueCommit={(vals) => onSelect(vals[0])}
         disabled={isSubmitting}
         data-testid="slider-score"
         aria-label="Score"

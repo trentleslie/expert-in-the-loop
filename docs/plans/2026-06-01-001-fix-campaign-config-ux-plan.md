@@ -201,7 +201,7 @@ The one cross-phase dependency: Unit 7 introduces `scoringLabels.ts`, which Unit
 
 **Verification:** Exported JSON for test4 contains `evidence_status`/`resolution_layer`/`unsure_votes`; a TSV download opens tab-delimited; CSV injection still neutralized (checklist §8).
 
-- [ ] **Unit 3: Review scoring & display fixes — slider commit, target-only link, dedupe confidence (#15, #2, #3)**
+- [x] **Unit 3: Review scoring & display fixes — slider commit, target-only link, dedupe confidence (#15, #2, #3)** — ✅ shipped (UI; verify on dev)
 
 **Goal:** Numeric slider selects-then-commits; external link renders only on the target; the always-visible duplicate confidence is removed.
 
