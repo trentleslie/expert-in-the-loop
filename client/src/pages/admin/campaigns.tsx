@@ -435,8 +435,12 @@ function EditConfigDialog({
   // Load the campaign's stored config (or the default) when the dialog opens.
   // GET /api/campaigns/:id returns a base Campaign (which already carries
   // config + recomputeStatus) — no need to widen to CampaignWithStats.
+  // Single-string key so the default getQueryFn fetches the DETAIL endpoint
+  // (`/api/campaigns/:id`). A ["/api/campaigns", id] key would fetch the LIST
+  // endpoint and drop the id, making the editor load defaults and clobber the
+  // saved config on save (the #5 bug).
   const { data: fullCampaign } = useQuery<Campaign>({
-    queryKey: ["/api/campaigns", campaign.id],
+    queryKey: [`/api/campaigns/${campaign.id}`],
     enabled: open,
   });
 
