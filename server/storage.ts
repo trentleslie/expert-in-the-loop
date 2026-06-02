@@ -101,6 +101,7 @@ export interface IStorage {
       voteCount: number;
       positiveVotes: number;
       negativeVotes: number;
+      meanScore: number | null;
       skipCount: number;
       positiveRate: number | null;
     }[];
@@ -108,7 +109,7 @@ export interface IStorage {
     page: number;
     totalPages: number;
   }>;
-  
+
   // Get pair details with all votes
   getPairDetails(pairId: string): Promise<{
     pair: Pair;
@@ -785,6 +786,10 @@ export class DatabaseStorage implements IStorage {
         voteCount: sql<number>`COALESCE(COUNT(DISTINCT ${votes.id}), 0)::int`,
         positiveVotes: sql<number>`COALESCE(SUM(CASE WHEN ${votes.scoreBinary} = 'match' THEN 1 ELSE 0 END), 0)::int`,
         negativeVotes: sql<number>`COALESCE(SUM(CASE WHEN ${votes.scoreBinary} = 'no_match' THEN 1 ELSE 0 END), 0)::int`,
+        // Mean of numeric scores among active votes (NULL for binary campaigns —
+        // AVG skips the NULL scoreNumeric of binary votes). Powers the numeric
+        // results "Mean" column.
+        meanScore: sql<number | null>`AVG(${votes.scoreNumeric})::float`,
         skipCount: sql<number>`COALESCE(COUNT(DISTINCT ${skippedPairs.id}), 0)::int`,
       })
       .from(pairs)
@@ -800,6 +805,7 @@ export class DatabaseStorage implements IStorage {
       voteCount: row.voteCount,
       positiveVotes: row.positiveVotes,
       negativeVotes: row.negativeVotes,
+      meanScore: row.meanScore,
       skipCount: row.skipCount,
       positiveRate: row.voteCount > 0 ? row.positiveVotes / row.voteCount : null,
     }));

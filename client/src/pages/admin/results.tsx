@@ -66,6 +66,7 @@ type PairResult = {
   voteCount: number;
   positiveVotes: number;
   negativeVotes: number;
+  meanScore: number | null;
   skipCount: number;
   positiveRate: number | null;
 };
@@ -777,15 +778,21 @@ export default function ResultsBrowserPage() {
                       </SortableHead>
                       <TableHead className="text-center">Skips</TableHead>
                       <TableHead>Consensus</TableHead>
-                      <SortableHead
-                        field="positiveRate"
-                        sortField={sortField}
-                        sortDirection={sortDirection}
-                        onSort={handleSort}
-                        className="text-right"
-                      >
-                        Agreement
-                      </SortableHead>
+                      {isNumericCampaign ? (
+                        // Numeric campaigns have no positive-rate "Agreement";
+                        // show the mean score instead.
+                        <TableHead className="text-right">Mean</TableHead>
+                      ) : (
+                        <SortableHead
+                          field="positiveRate"
+                          sortField={sortField}
+                          sortDirection={sortDirection}
+                          onSort={handleSort}
+                          className="text-right"
+                        >
+                          Agreement
+                        </SortableHead>
+                      )}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -840,7 +847,11 @@ export default function ResultsBrowserPage() {
                           <EvidenceStatusBadge status={row.pair.evidenceStatus} />
                         </TableCell>
                         <TableCell className="text-right text-sm font-mono">
-                          {row.positiveRate !== null
+                          {isNumericCampaign
+                            ? row.meanScore != null
+                              ? row.meanScore.toFixed(1)
+                              : "-"
+                            : row.positiveRate !== null
                             ? `${(row.positiveRate * 100).toFixed(0)}%`
                             : "-"}
                         </TableCell>
