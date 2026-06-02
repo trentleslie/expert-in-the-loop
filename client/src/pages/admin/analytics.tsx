@@ -417,7 +417,10 @@ function EvidenceTierSection({
         <ResponsiveContainer width="100%" height={120}>
           <BarChart data={[chartRow]} layout="vertical" stackOffset="expand">
             <CartesianGrid strokeDasharray="3 3" className="opacity-50" />
-            <XAxis type="number" hide domain={[0, total || 1]} />
+            {/* stackOffset="expand" normalizes the stack to fractions summing to
+                1, so the axis domain must be [0,1] — a [0,total] domain shrinks
+                the full-width bar to total⁻¹ of the card. */}
+            <XAxis type="number" hide domain={[0, 1]} />
             <YAxis type="category" dataKey="name" hide />
             <Tooltip
               formatter={(value: number, name: string) => [
