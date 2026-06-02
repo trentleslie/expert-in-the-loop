@@ -8,13 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import {
   Accordion,
   AccordionContent,
@@ -105,47 +99,6 @@ function ExternalEntityLink({
   );
 }
 
-type Alternative = {
-  code: string;
-  name?: string;
-  confidence?: number;
-  vector_similarity?: number;
-};
-
-/**
- * Parse expert-alternative suggestions generically from entity metadata. Prefers
- * a generic `alternatives` key; falls back to the legacy `top_5_loinc` key for
- * back-compat with LOINC imports. Handles JSON arrays, Python-style list strings
- * ("['a','b']"), and arrays of either bare strings or {code,name,...} objects.
- */
-function parseAlternatives(metadata: Record<string, unknown> | null | undefined): Alternative[] {
-  if (!metadata) return [];
-  const raw = metadata.alternatives ?? metadata.top_5_loinc;
-  if (!raw) return [];
-
-  const normalize = (arr: unknown[]): Alternative[] =>
-    arr
-      .map((item) => {
-        if (typeof item === "string") return { code: item };
-        if (typeof item === "object" && item !== null && (item as any).code) {
-          return item as Alternative;
-        }
-        return null;
-      })
-      .filter((item): item is Alternative => item !== null);
-
-  try {
-    if (typeof raw === "string") {
-      const parsed = JSON.parse(raw.replace(/'/g, '"'));
-      if (Array.isArray(parsed)) return normalize(parsed);
-    }
-    if (Array.isArray(raw)) return normalize(raw);
-  } catch {
-    return [];
-  }
-  return [];
-}
-
 function EntityCard({
   type,
   text,
@@ -161,14 +114,11 @@ function EntityCard({
   metadata?: Record<string, unknown> | null;
   display: CampaignConfig["display"];
 }) {
-  const alternatives = display.showAlternatives ? parseAlternatives(metadata) : [];
-
-  // Filter out the alternatives keys from displayed metadata since they're shown
-  // separately. Only render the metadata badges when the panel is enabled.
+  // Suggested alternatives are now just ordinary metadata columns (the admin
+  // chooses which to display) — no special parsing. The reviewer types their
+  // chosen alternate into the free-text "Suggest alternative match" box below.
   const displayMetadata = display.showMetadataPanel && metadata
-    ? Object.entries(metadata)
-        .filter(([key]) => key !== "top_5_loinc" && key !== "alternatives")
-        .slice(0, 3)
+    ? Object.entries(metadata).slice(0, 3)
     : [];
 
   return (
@@ -206,31 +156,6 @@ function EntityCard({
                   {key}: {String(value)}
                 </Badge>
               ))}
-            </div>
-          )}
-          {alternatives.length > 0 && (
-            <div className="pt-2">
-              <p className="text-xs text-muted-foreground mb-1">Alternative suggestions:</p>
-              <div className="flex flex-col gap-1">
-                {alternatives.map((alt) => (
-                  <div key={alt.code} className="flex items-center gap-2 text-xs">
-                    <ExternalEntityLink
-                      id={alt.code}
-                      showExternalLinks={display.showExternalLinks}
-                      linkTemplate={display.linkTemplate}
-                      className="shrink-0"
-                    />
-                    {alt.name && (
-                      <span className="text-muted-foreground truncate">{alt.name}</span>
-                    )}
-                    {alt.confidence !== undefined && (
-                      <Badge variant="secondary" className="text-xs shrink-0">
-                        {(alt.confidence * 100).toFixed(0)}%
-                      </Badge>
-                    )}
-                  </div>
-                ))}
-              </div>
             </div>
           )}
         </div>
@@ -749,33 +674,25 @@ export default function ReviewPage() {
             {/* Expert selection and notes */}
             <Card className="border-card-border">
               <CardContent className="p-4 space-y-4">
-                {/* Expert alternative selection (gated on config.display.showAlternatives) */}
+                {/* Expert alternative entry (gated on config.display.showAlternatives).
+                    Free-text: the reviewer types the correct identifier directly.
+                    Any suggested alternatives are shown as ordinary metadata on the
+                    entity cards above. */}
                 {display.showAlternatives && (
                   <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">
+                    <label htmlFor="input-expert-code" className="text-sm font-medium text-foreground">
                       Suggest alternative match (optional)
                     </label>
-                    <Select
-                      value={expertSelectedCode || "none"}
-                      onValueChange={(value) => setExpertSelectedCode(value === "none" ? null : value)}
-                    >
-                      <SelectTrigger data-testid="select-expert-code">
-                        <SelectValue placeholder="Select from alternatives..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">None (use AI suggestion)</SelectItem>
-                        {parseAlternatives(pairData.pair.targetMetadata as Record<string, unknown> | null).map((alt) => (
-                          <SelectItem key={alt.code} value={alt.code}>
-                            <span className="flex items-center gap-2">
-                              <span className="font-mono">{alt.code}</span>
-                              {alt.name && <span className="text-muted-foreground text-xs truncate max-w-48">{alt.name}</span>}
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Input
+                      id="input-expert-code"
+                      value={expertSelectedCode ?? ""}
+                      onChange={(e) => setExpertSelectedCode(e.target.value.trim() === "" ? null : e.target.value)}
+                      placeholder="Type the correct identifier…"
+                      maxLength={128}
+                      data-testid="input-expert-code"
+                    />
                     <p className="text-xs text-muted-foreground">
-                      If the AI's suggestion isn't correct, select a better match from the alternatives
+                      If the AI's suggestion isn't correct, enter the identifier of a better match.
                     </p>
                   </div>
                 )}
