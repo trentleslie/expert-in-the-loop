@@ -40,7 +40,7 @@ Production currently runs Google OAuth on the pre-generalization schema. The new
 
 ### Deferred to Separate Tasks
 
-- **Post-cutover cleanup** (drop the vestigial `session` table, remove Google OAuth env vars / `connect-pg-simple`): a separate task once Clerk prod has run clean for a while.
+- **Post-cutover cleanup** (drop the vestigial `session` table, remove Google OAuth env vars / `connect-pg-simple`, **and rotate/revoke the Google OAuth client secret in Google Cloud Console** — a long-lived credential left live on the box; removing the env var alone does NOT revoke it): a separate task once Clerk prod has run clean for a while. Also update `CLAUDE.md` + `/servers` to say "Production uses Clerk" (the current "still Google OAuth" note will mislead the next operator until changed).
 - **True off-box of the hourly dumps** (install `aws` CLI on the box + `s3 sync`): optional hardening, not required for this cutover.
 
 ## Context & Research
@@ -84,9 +84,13 @@ Production currently runs Google OAuth on the pre-generalization schema. The new
 - **🔴 Archiving all current prod campaigns → the 413 votes are REAL WORK.** Keep the clean-slate archive, but **(a)** export all 5 campaigns to CSV before `migration-002` (Unit 3) as durable, portable insurance, and **(b)** get explicit **campaign-owner sign-off** that read-only archived access is acceptable. R1's "no data loss" is reframed below to mean rows-preserved, not work-continues.
 - **Email-verification guard → ADD IT** (Unit 1b, a small pre-promotion code change): require `primaryEmailAddress.verification.status === 'verified'` before `/api/auth/me` migrates a local user to a Clerk ID.
 
+### Surfaced by the 2026-06-02 review — NEED a decision before the window
+- **🔴 How to make the user-ID migration FK-safe (Unit 1c).** Choose **(A) `ON UPDATE CASCADE`** on the five `users.id` FKs (schema + migration-001 change, atomic, `updateUserId` stays trivial) vs **(B) transactional re-point** inside `updateUserId` (no schema change, more app code, must enumerate every referencing table). Recommendation: **(A)** — DB-enforced and atomic, less room for a missed table; the constraint surgery rides in the already-destructive `migration-001`. This is blocking — without it, no existing user can log in post-cutover.
+- **Re-examine clean-slate archive vs forward-migrate (product).** The review challenged the premise: since Unit 4 adds the new columns *with DEFAULTs*, forward-migrating the 5 existing campaigns into the new model looks technically plausible, so the archive freeze of 413 votes of in-flight work may be a convenience choice, not a necessity. Decide explicitly: (a) confirm migrate-in-place is genuinely infeasible (state why), or (b) evaluate it. Also confirm whether an exported archived campaign can be **re-imported to resume** validation (continuity), not just viewed — and collect owner sign-off as an *informed choice between options*, not after the decision is locked.
+
 ### Deferred to implementation
 - Exact maintenance-window time + reviewer notification — schedule at execution (off-hours; the cutover invalidates all sessions, so everyone re-logs-in via Clerk).
-- The precise set of prod admins to re-grant on the Clerk prod instance — enumerate from the prod `users` table at execution (Unit 3).
+- The precise set of prod admins to enumerate for re-granting (the re-grant itself happens in Unit 3, pre-window) — list from the prod `users` table at execution.
 - Whether any prod user emails fall outside `*@phenomehealth.org` (would need allowlist additions) — verify at execution (Unit 3).
 
 ## High-Level Technical Design
@@ -98,18 +102,22 @@ flowchart TB
   subgraph PREP["Reversible prep — no prod impact (days ahead)"]
     U0["Unit 0: Provision Clerk PROD instance (DNS, pk_live/sk_live, allowlist, Google conn, role claim)"]
     U1["Unit 1: Fix deploy.yml to source VITE_ Clerk var before build"]
+    U1b["Unit 1b: Verified-email guard in /api/auth/me (code PR)"]
+    U1c["Unit 1c 🔴: FK-safe user-ID migration + case-insensitive email (code PR)"]
     U2["Unit 2: Stage prod .env (Clerk keys; keep Google vars)"]
-    U3["Unit 3: Pre-cutover safety — manual snapshot, verify backups, verify users/domains, list admins"]
+    U3["Unit 3: Pre-cutover safety — snapshot, backups+auth-path dry-run, users/domains, list admins"]
   end
   subgraph WINDOW["Maintenance window — irreversible"]
     U4["Unit 4: Cutover — stop -> pre-migration dump -> migration-001 SQL -> additive db:push (NO --force) -> migration-002 SQL -> build -> start -> verify schema+auth"]
   end
   subgraph AFTER["Post-cutover"]
-    U5["Unit 5: Merge dev->main (auto-deploy onto migrated DB) -> health checks -> re-grant admin on Clerk prod -> smoke test"]
+    U5["Unit 5: Merge dev->main (auto-deploy onto migrated DB) -> health checks -> confirm admin access (re-granted in Unit 3) -> smoke test"]
   end
   U6["Unit 6: Rollback path + go/no-go (documented; execute only on failure)"]
   U0 --> U2 --> U3 --> U4 --> U5
   U1 --> U4
+  U1b --> U4
+  U1c --> U4
   U4 -. "on failure" .-> U6
   U5 -. "on failure" .-> U6
 ```
@@ -183,6 +191,34 @@ flowchart TB
 
 **Verification:** Merged to `main` ahead of the window; the unverified-email case is covered by a test.
 
+> **Caveat (review 2026-06-02):** confirm the installed backend Clerk SDK actually exposes `primaryEmailAddress.verification.status` on `clerkClient.users.getUser()` (and that social-connection/Google emails report the literal string `'verified'`). If not, the guard's deny path 403s **every** prod user at cutover. Verify against the prod instance before relying on it.
+
+- [ ] **Unit 1c: Make the `/api/auth/me` migration path prod-safe (pre-window code change) 🔴**
+
+**Goal:** The user-ID migration that *every* existing prod user triggers on first Clerk login must not fail. Two latent bugs in the current path (surfaced by the 2026-06-02 review) would otherwise lock out all 9 users — admins included — at cutover. **This is the review's P0.**
+
+**Requirements:** R2
+
+**Dependencies:** None (a standalone PR merged before the window — ideally before the dev QA pass so it's exercised there). Pairs naturally with Unit 1b (same file/path).
+
+**Files:**
+- Modify: `server/storage.ts` (`updateUserId`, `getUserByEmail`)
+- Modify (if fix A): `shared/schema.ts` + `scripts/migration-001-generalize-schema.sql`
+- Test: server test surface (see Unit 1b note on test infra)
+
+**Approach — two defects, both in the find-or-create path all prod users hit cold:**
+1. **🔴 FK-safe ID migration.** `updateUserId` runs `UPDATE users SET id = <clerkId>` while `campaigns.created_by`, `votes.user_id`, `pairs.added_by`, `skipped_pairs.user_id`, `import_templates.created_by` reference `users.id` with **no `ON UPDATE` rule (Postgres default `NO ACTION`)**. The update is **rejected by a foreign-key violation** for any user with referencing rows (all real users) → `/api/auth/me` 500 → can't log in. Dev never caught this (fresh/wiped users had no referencing rows). **Pick a fix (see Open decisions):**
+   - **(A) `ON UPDATE CASCADE`** on the five FKs — add `{ onUpdate: "cascade" }` to the `.references()` in `shared/schema.ts` and apply on prod by dropping/re-adding those constraints inside `migration-001` (it already does constraint surgery). DB re-points children atomically; `updateUserId` stays a one-liner. *Cost:* schema + migration change.
+   - **(B) Transactional re-point in `updateUserId`** — in one transaction: copy the user row to a new row keyed by the Clerk id, `UPDATE` each child table's user-FK old→new, delete the old row. No schema change; contained to one function. *Cost:* more app code; must enumerate every referencing table (a missed table orphans rows).
+2. **Case-insensitive email match.** `getUserByEmail` uses `eq(users.email, email)` (exact, case-sensitive). If Clerk/Google return different casing than the stored Google-OAuth email, the match misses → a **duplicate row is created defaulting `role:'reviewer'`**, silently demoting an admin. Normalize both sides (`lower(...)`) on match.
+
+**Test scenarios:**
+- 🔴 Happy path: a user who **owns campaigns + votes** is migrated old-id → Clerk-id with **all** their campaigns/votes/pairs still attached (no FK error, no orphan). The exact case dev never exercised.
+- Edge case: stored `First.Last@phenomehealth.org` matches Clerk primary `first.last@phenomehealth.org` onto the existing row — no duplicate, role preserved.
+- Error path: an unverified primary email (Unit 1b) still blocks migration.
+
+**Verification:** Merged to `main` ahead of the window; FK-safe migration + case-insensitive match covered by tests run **against a user with referencing rows**.
+
 - [ ] **Unit 2: Stage the production `.env`**
 
 **Goal:** Prod `.env` (`/home/ubuntu/expert-in-the-loop/.env`) has the Clerk vars; Google vars retained for rollback.
@@ -201,13 +237,13 @@ flowchart TB
 **Test scenarios:**
 - Edge case: a value containing `!` or `=`/quotes is rejected/escaped — confirm the service still parses `.env` after the edit (`systemctl show` env, or a no-op restart on a scratch check).
 
-**Verification:** `.env` contains all Clerk keys + allowlist; Google vars still present; staged but **not yet deployed**.
+**Verification:** `.env` contains all Clerk keys + allowlist; Google vars still present; **`stat -c '%a' .env` returns `600`** (the box is shared with biomapper/kraken/pgs running as the same `ubuntu` user — a world-readable `.env` leaks `CLERK_SECRET_KEY` + the Google secret); staged but **not yet deployed**.
 
 - [ ] **Unit 3: Pre-cutover safety + readiness**
 
 **Goal:** Rollback anchors exist and prod users are Clerk-ready.
 
-**Requirements:** R2, R4
+**Requirements:** R2, R4, R6 *(this unit owns scheduling/communicating the window — see the cron-pause + 06:00-avoidance + reviewer-notification steps below)*
 
 **Dependencies:** Unit 0.
 
@@ -218,6 +254,9 @@ flowchart TB
 - Run `db-backup.sh manual pre-migration` and **test-restore** it into a throwaway DB (as already proven for the tooling).
 - **Export all 5 current prod campaigns to CSV** (via the current service's export route, while it's still up) and store the files alongside the pre-migration dump — portable, owner-usable insurance since `migration-002` freezes them read-only. **Get explicit campaign-owner sign-off** that read-only archived access is acceptable; record who approved.
 - **🔬 Migration dry-run (rehearsal):** restore the prod dump into a **scratch DB**, then run `migration-001` SQL + `db:push` **there** and **capture the exact `db:push` interactive prompt sequence + correct answers** and confirm the plan is **ADD-only (no DROP, `session` table intact)**. `db:push` is interactive and has no true dry-run — this rehearsal against *prod-shaped* data (prod has the `session` table dev lacks) is the only way to know the real prompts before the live window.
+  - **⚠️ Point `DATABASE_URL` at the scratch DB explicitly** for every command in the rehearsal (`drizzle.config.ts` reads `process.env.DATABASE_URL`). If you instead source the staged prod `.env` here, `db:push` runs its **interactive, destructive push against LIVE prod** pre-window — the exact event this runbook exists to gate. Verify with `psql "$DATABASE_URL" -c '\conninfo'` before each push.
+  - **🔴 Rehearse the auth migration path too** (not just the schema): against the restored scratch DB, exercise `/api/auth/me` find-or-create for a real prod user **who owns campaigns/votes**, confirming the Unit 1c FK-safe migration lands them on their existing row with all data attached. The schema dry-run alone does NOT cover this — it is exactly where the P0 (FK violation on `updateUserId`) hides.
+  - **Confirm prod schema is unchanged between this rehearsal and the window** (no out-of-band ALTERs) — otherwise the captured prompt playbook can diverge from the live prompts.
 - **Re-grant admin on the prod Clerk instance NOW (pre-window).** Clerk `publicMetadata.role` is set on the instance independently of any code deploy, so re-granting here means the **first token minted post-cutover already carries admin** — eliminating the admin-less window and the lockout-risk rollback trigger. Enumerate prod admins from the prod DB `users` table; set `publicMetadata.role="admin"` via `npx clerk api` on the prod instance; verify in the Dashboard.
 - Enumerate prod `users` (emails); confirm **all** emails are within the allowlist domain (add to the Clerk allowlist if not) **and** that the Google connection on the prod instance will return them as **verified primary** emails (so the `/api/auth/me` email-match lands them on their existing row, not `unknown@unknown.com` or a duplicate).
 - **Verify the allowlist actually blocks** a non-`@phenomehealth.org` test account on the **prod** instance (server has no independent domain check — the allowlist is the only gate).
@@ -247,10 +286,10 @@ flowchart TB
 3. Check out the new code on the box (so `scripts/` + new `schema.ts` are present before the service runs new code).
 4. `npm ci`.
 5. Run `migration-001` SQL (destructive, idempotent).
-6. Source `.env`; run `db:push`. **Use the prompt playbook captured in the Unit 3 dry-run** — for each new column answer **"create column"** (never "rename"/"truncate"); **confirm the plan is ADD-only** (ADD COLUMN / CREATE TABLE), **never `--force`**, no DROP of `session`. **ABORT to Unit 6 on any unexpected prompt.**
+6. Source `.env`; **assert `DATABASE_URL` resolves to `expertloop`** (`psql "$DATABASE_URL" -c '\conninfo'`) so the push can't accidentally target a sibling DB on the shared box; then run `db:push`. **Use the prompt playbook captured in the Unit 3 dry-run** — for each new column answer **"create column"** (never "rename"/"truncate"); **confirm the plan is ADD-only** (ADD COLUMN / CREATE TABLE), **never `--force`**, no DROP of `session`. **ABORT to Unit 6 on any unexpected prompt** (the new columns are `NOT NULL DEFAULT`, so prompt wording can vary run-to-run — only the captured playbook against prod-shaped data is trusted).
 7. Run `migration-002` SQL (archive existing campaigns). *(See the open product decision — archiving freezes all current prod campaigns.)*
 8. `npm run build`.
-9. Start `expert-in-the-loop` (unmask first if masked in step 1). Check out / fast-forward the box to the **`main`** equivalent so the Unit 5 auto-deploy `git pull origin main` is a clean fast-forward.
+9. **Before start, assert `grep -q '^CLERK_SECRET_KEY=' .env`** — `server/auth.ts` *silently* disables the FAPI proxy in production if it's unset, so login fails in a non-obvious way (app appears up, no one can authenticate). Then start `expert-in-the-loop` (unmask first if masked in step 1). Check out / fast-forward the box to **the exact commit being promoted (current `dev` HEAD)** — not the stale `main`, which hasn't been merged yet — so the Unit 5 auto-deploy `git pull origin main` (after the merge) is a clean fast-forward.
 
 **Execution note:** This is the only irreversible unit. Do not proceed past any gate that fails — go to Unit 6.
 
@@ -264,7 +303,7 @@ flowchart TB
 
 - [ ] **Unit 5: Merge, deploy, and post-cutover validation**
 
-**Goal:** `main` reflects the promoted code; admins restored; prod smoke-tested end-to-end.
+**Goal:** `main` reflects the promoted code; admin access **verified** (roles were re-granted pre-window in Unit 3); prod smoke-tested end-to-end.
 
 **Requirements:** R1, R2, R5
 
@@ -276,6 +315,7 @@ flowchart TB
 - Merge `dev → main` (this is the project's PR workflow — budget PR-creation/review time into the window, or pre-stage the PR). The auto-deploy fast-forwards onto the **already-migrated, already-running** box (a no-op-ish restart on the same code). The Actions run going green is **not** the authoritative gate (even with the Unit 1 fix, a 200 only proves the shell serves) — the **manual smoke test below is**.
 - Admin roles were **already re-granted pre-window (Unit 3)** — here, just confirm each admin can reach `admin/*` (their first post-cutover login mints a token already carrying `role:admin`).
 - Smoke test on prod: login (Clerk) → create a campaign → import a few pairs → vote → export CSV → archived pre-cutover campaigns are read-only.
+- **Open an archived pre-cutover campaign's Results AND Analytics views under the new code.** `campaigns.config` jsonb has no SQL default, so the 5 archived campaigns are `config=NULL` post-cutover; the new generalized results/analytics/config-editor read `config`. A null-config crash here would make exactly the "preserved" historical data **unviewable** (rows kept, but the screens error) — verify these render, don't just that the campaign rejects writes.
 - **Confirm each of the known prod users successfully re-authenticated** (or follow up with any who didn't) — a silently locked-out reviewer should be caught, not lost.
 - Re-enable the hourly `pg_dump` cron (paused in Unit 3) and take a **fresh `manual success` dump** before declaring done (the pre-migration dump is now stale).
 
@@ -295,13 +335,14 @@ flowchart TB
 
 **Files (reference):** `scripts/migration-001-rollback.sql`; the pre-migration dump; the manual snapshot.
 
-**⏳ Rollback-safe window (critical):** keep prod effectively **write-frozen** (all campaigns are archived = read-only; also hold off creating new campaigns / reopening) until **every** go/no-go below is cleared. The pre-migration dump goes **stale the instant any new-model write occurs**, and `migration-001-rollback.sql` **hard-fails the moment any vote is edited** (it can't re-add the `(pair_id,user_id)` unique constraint once a supersession row exists). So:
+**⏳ Rollback-safe window (critical):** keep prod effectively **write-frozen** (all campaigns are archived = read-only; also hold off creating new campaigns / reopening) until **every** go/no-go below is cleared. The pre-migration dump goes **stale the instant any new-model write occurs**, and `migration-001-rollback.sql` **hard-fails the moment any vote is edited** (it can't re-add the `(pair_id,user_id)` unique constraint once a supersession row exists). **"Write" includes server-initiated writes**, not just reviewer actions: startup `recompute_status` reconciliation, evidence-status recompute, or a `lastActive` update on the operator's own verification login can each stale the anchor before any human votes — so do the go/no-go decision promptly and avoid triggering recomputes during verification. So:
 - **Before any vote edit:** schema-only revert is available — restore the pre-migration `pg_dump` **or** apply `migration-001-rollback.sql`.
 - **After the first vote edit:** `migration-001-rollback.sql` is **dead**; the only path is restoring the pre-migration `pg_dump` (accepting loss of any post-cutover writes) or the instance snapshot.
 
 **Approach (decision aid, not run unless triggered):**
 - **Full revert:** restore the pre-migration dump → revert `main` to the pre-promotion commit → redeploy (the Google-OAuth code) → confirm `.env` still has the Google vars and the **`session` table is intact** (it is, because no `--force`).
 - **Worst case:** restore the manual Lightsail instance snapshot (whole box).
+- **In every rollback path:** re-enable the hourly `pg_dump` cron (paused in Unit 3) as the first action once the service is restored — a failed cutover must not also leave the box with no automated backups.
 
 **Go/No-Go criteria (trigger rollback, while still write-frozen, if):** `db:push` shows any DROP / non-additive change or an unexpected interactive prompt; post-migration row counts differ; the service won't start / fails the smoke test; the **FAPI proxy 502s** or Clerk login can't complete token exchange for valid `@phenomehealth.org` users and isn't a quick config fix; admins can't reach `admin/*`. **Decide before reopening writes** — once reviewers vote, rollback means accepted data loss.
 
@@ -333,6 +374,11 @@ flowchart TB
 | Hourly `pg_dump` cron or 06:00 auto-snapshot captures a half-migrated DB / I-O contention | Med | Med | Unit 3 pauses the cron + schedules the window away from 06:00 UTC. |
 | Old code auto-restarts (systemd `Restart=always`) against the migrated DB mid-window | Low | High | Unit 4 step 1 verifies inactive + masks the unit during the window. |
 | FAPI proxy 502 / wrong allowed-origins → Clerk login "half-works" | Med | High | Unit 0/4 verify `CLERK_SECRET_KEY` set, allowed origins include `expertintheloop.io`, and `/api/__clerk` returns healthy. |
+| **🔴 `updateUserId` PK update violates FKs (no `ON UPDATE CASCADE`) → every existing user 500s on first login** | **High** | **High** | **Unit 1c** fixes the migration to be FK-safe (CASCADE or transactional re-point); **Unit 3 rehearses the auth path** against a restored user with campaigns/votes; smoke test confirms an existing user lands on their row. |
+| Case-sensitive email match → duplicate row, admin silently demoted to reviewer | Med | Med | Unit 1c normalizes email casing on match; Unit 3 verifies per-user casing parity between Google and the stored email. |
+| Archived campaigns are `config=NULL` → new code crashes on their Results/Analytics views | Med | Med | Unit 5 smoke test opens an archived campaign's Results + Analytics under the new code (not just the read-only write check). |
+| Dry-run `db:push` run with prod `DATABASE_URL` sourced → destructive push hits LIVE prod pre-window | Med | High | Unit 3 scopes `DATABASE_URL` to the scratch DB explicitly + `\conninfo` check; Unit 4 step 6 asserts `DATABASE_URL=expertloop` before pushing. |
+| CI auto-deploy (`deploy.yml`) restarts the box mid-window on a stray push to `main` → restart onto half-migrated DB | Low | High | Beyond masking the systemd unit, disable/guard the `deploy.yml` workflow for the window; merge `dev→main` only in Unit 5 after the box is migrated. |
 
 ## Documentation / Operational Notes
 
