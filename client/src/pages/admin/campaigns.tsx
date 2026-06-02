@@ -441,9 +441,16 @@ function EditConfigDialog({
   // (`/api/campaigns/:id`). A ["/api/campaigns", id] key would fetch the LIST
   // endpoint and drop the id, making the editor load defaults and clobber the
   // saved config on save (the #5 bug).
+  // staleTime:0 so each open refetches the saved config. The global default is
+  // staleTime:Infinity, and saving only invalidates the LIST prefix
+  // (["/api/campaigns"] in handleRefresh), which — because this is a
+  // single-string detail key — does NOT prefix-match. Without this, reopening
+  // the editor after a save shows the pre-save cache (the change looks reverted
+  // even though it persisted). See docs/solutions/.../getqueryfn-querykey-footgun.
   const { data: fullCampaign } = useQuery<Campaign>({
     queryKey: [`/api/campaigns/${campaign.id}`],
     enabled: open,
+    staleTime: 0,
   });
 
   useEffect(() => {
