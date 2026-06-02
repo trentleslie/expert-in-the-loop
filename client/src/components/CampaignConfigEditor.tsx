@@ -491,8 +491,14 @@ export function CampaignConfigEditor({
         defaultOpen={false}
         testid="import"
       >
-        <div className="flex items-center justify-between">
-          <Label htmlFor="source-prefix-filter">Filter imports by source prefix</Label>
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <Label htmlFor="source-prefix-filter">Drop same-source pairs</Label>
+            <p className="text-xs text-muted-foreground">
+              Pairs whose source and target IDs share one of these prefixes are skipped at
+              import. Add the prefixes that identify each source (e.g. arivale_, ukbb_).
+            </p>
+          </div>
           <Switch
             id="source-prefix-filter"
             checked={value.import.sourcePrefixFilter}
