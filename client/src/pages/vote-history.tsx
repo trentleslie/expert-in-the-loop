@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient as qc } from "@/lib/queryClient";
 import { binaryVoteLabel, numericVoteLabel } from "@/lib/scoringLabels";
+import { ScoringControls } from "@/components/ScoringControls";
 import type { CampaignConfig } from "@shared/campaignConfig";
 import {
   ArrowLeft,
@@ -274,22 +275,31 @@ function EditVoteDialog({
           ) : (
             <div className="space-y-2">
               <Label>Your Score</Label>
-              <div className="flex gap-1">
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <Button
-                    key={n}
-                    variant={scoreNumeric === n ? "default" : "outline"}
-                    className="flex-1"
-                    onClick={() => setScoreNumeric(n)}
-                    data-testid={`button-edit-score-${n}`}
-                  >
-                    {n}
-                  </Button>
-                ))}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                1 = Unrelated, 5 = Exact match
-              </p>
+              {scoring?.mode === "numeric" ? (
+                // Config-driven: real range + per-value labels + slider for large
+                // ranges. Replaces the legacy hardcoded 1-5 / "Unrelated…Exact".
+                <ScoringControls
+                  scoring={scoring}
+                  numericValue={scoreNumeric}
+                  onNumericSelect={setScoreNumeric}
+                  onBinarySelect={() => {}}
+                />
+              ) : (
+                // Fallback only when the campaign config hasn't loaded.
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <Button
+                      key={n}
+                      variant={scoreNumeric === n ? "default" : "outline"}
+                      className="flex-1"
+                      onClick={() => setScoreNumeric(n)}
+                      data-testid={`button-edit-score-${n}`}
+                    >
+                      {n}
+                    </Button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
