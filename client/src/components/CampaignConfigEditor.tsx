@@ -9,9 +9,9 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { ChevronDown, ChevronRight, Plus, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Plus, X } from "lucide-react";
 import { ScoringControls } from "@/components/ScoringControls";
-import { campaignConfigSchema, type CampaignConfig } from "@shared/campaignConfig";
+import { campaignConfigSchema, defaultNumericThresholds, type CampaignConfig } from "@shared/campaignConfig";
 
 /**
  * Controlled editor for a campaign's CampaignConfig.
@@ -47,11 +47,13 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
 
 function CollapsibleSection({
   title,
+  description,
   defaultOpen,
   children,
   testid,
 }: {
   title: string;
+  description?: string;
   defaultOpen: boolean;
   children: React.ReactNode;
   testid: string;
@@ -66,12 +68,20 @@ function CollapsibleSection({
           data-testid={`config-section-${testid}`}
         >
           <SectionHeading>{title}</SectionHeading>
-          {open ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+          {open ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </button>
       </CollapsibleTrigger>
-      <CollapsibleContent className="px-3 pb-3 space-y-3">{children}</CollapsibleContent>
+      <CollapsibleContent className="px-3 pb-3 space-y-3">
+        {description && <p className="text-xs text-muted-foreground">{description}</p>}
+        {children}
+      </CollapsibleContent>
     </Collapsible>
   );
+}
+
+/** One-line muted description shown under a section heading. */
+function SectionDescription({ children }: { children: React.ReactNode }) {
+  return <p className="text-xs text-muted-foreground">{children}</p>;
 }
 
 export function CampaignConfigEditor({
@@ -103,6 +113,26 @@ export function CampaignConfigEditor({
     if (mode === "binary") setSavedBinary(value.scoring as BinaryScoring);
     else setSavedNumeric(value.scoring as NumericScoring);
     const restored = nextMode === "binary" ? savedBinary : savedNumeric;
+    // Seed sensible numeric consensus thresholds the first time a campaign
+    // switches to numeric (the schema requires both, with confirm > reject).
+    if (
+      nextMode === "numeric" &&
+      (value.consensus.numericConfirmThreshold == null ||
+        value.consensus.numericRejectThreshold == null)
+    ) {
+      const { min, max } = (restored as NumericScoring).numeric;
+      const defaults = defaultNumericThresholds(min, max);
+      onChange({
+        ...value,
+        scoring: restored,
+        consensus: {
+          ...value.consensus,
+          numericConfirmThreshold: value.consensus.numericConfirmThreshold ?? defaults.numericConfirmThreshold,
+          numericRejectThreshold: value.consensus.numericRejectThreshold ?? defaults.numericRejectThreshold,
+        },
+      });
+      return;
+    }
     onChange({ ...value, scoring: restored });
   };
 
@@ -151,6 +181,9 @@ export function CampaignConfigEditor({
       {/* ---- Scoring Mode (expanded) ---- */}
       <div className="space-y-3 border border-border rounded-md p-3">
         <SectionHeading>Scoring Mode</SectionHeading>
+        <SectionDescription>
+          How reviewers score each pair: a yes/no/unsure choice (binary) or a numeric scale.
+        </SectionDescription>
         <RadioGroup
           value={mode}
           onValueChange={(v) => handleModeChange(v as ScoringMode)}
@@ -169,25 +202,13 @@ export function CampaignConfigEditor({
         {/* ---- Scoring Labels (dynamic by mode) ---- */}
         <div className="space-y-3 pt-1">
           <SectionHeading>Scoring Labels</SectionHeading>
+          <SectionDescription>
+            The button/scale text reviewers see. Customize per campaign.
+          </SectionDescription>
           {mode === "binary" ? (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="space-y-1">
-                <Label htmlFor="label-positive">Positive</Label>
-                <Input
-                  id="label-positive"
-                  value={(value.scoring as BinaryScoring).binary.labels.positive}
-                  onChange={(e) =>
-                    setScoring({
-                      mode: "binary",
-                      binary: {
-                        labels: { ...(value.scoring as BinaryScoring).binary.labels, positive: e.target.value },
-                      },
-                    })
-                  }
-                  data-testid="input-label-positive"
-                />
-                <FieldError k="scoring.binary.labels.positive" />
-              </div>
+              {/* negative → neutral → positive, matching the review buttons
+                  (No Match · Unsure · Match) and the results votes column. */}
               <div className="space-y-1">
                 <Label htmlFor="label-negative">Negative</Label>
                 <Input
@@ -221,6 +242,23 @@ export function CampaignConfigEditor({
                   data-testid="input-label-neutral"
                 />
                 <FieldError k="scoring.binary.labels.neutral" />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="label-positive">Positive</Label>
+                <Input
+                  id="label-positive"
+                  value={(value.scoring as BinaryScoring).binary.labels.positive}
+                  onChange={(e) =>
+                    setScoring({
+                      mode: "binary",
+                      binary: {
+                        labels: { ...(value.scoring as BinaryScoring).binary.labels, positive: e.target.value },
+                      },
+                    })
+                  }
+                  data-testid="input-label-positive"
+                />
+                <FieldError k="scoring.binary.labels.positive" />
               </div>
             </div>
           ) : (
@@ -306,6 +344,9 @@ export function CampaignConfigEditor({
       {/* ---- Display Options (expanded) ---- */}
       <div className="space-y-3 border border-border rounded-md p-3">
         <SectionHeading>Display Options</SectionHeading>
+        <SectionDescription>
+          Which panels appear on the review screen: external links, alternatives, metadata.
+        </SectionDescription>
         <div className="flex items-center justify-between">
           <Label htmlFor="show-external-links">Show external links</Label>
           <Switch
@@ -352,7 +393,12 @@ export function CampaignConfigEditor({
       </div>
 
       {/* ---- Consensus Thresholds (collapsed) ---- */}
-      <CollapsibleSection title="Consensus Thresholds" defaultOpen={false} testid="consensus">
+      <CollapsibleSection
+        title="Consensus Thresholds"
+        description="How much agreement and how many votes decide a pair's evidence tier (confirmed / rejected / disputed)."
+        defaultOpen={false}
+        testid="consensus"
+      >
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="space-y-1">
             <Label htmlFor="min-votes">Min votes</Label>
@@ -365,6 +411,13 @@ export function CampaignConfigEditor({
               data-testid="input-min-votes"
             />
             <FieldError k="consensus.minVotes" />
+            {value.consensus.minVotes >= 2 && (
+              <p className="text-xs text-muted-foreground" data-testid="warning-min-votes">
+                Needs {value.consensus.minVotes} distinct reviewers per pair before
+                consensus is computed — with fewer active reviewers, pairs stay stuck
+                in review.
+              </p>
+            )}
           </div>
           <div className="space-y-1">
             <Label htmlFor="confirm-pct">Confirm %</Label>
@@ -432,7 +485,12 @@ export function CampaignConfigEditor({
       </CollapsibleSection>
 
       {/* ---- Import Options (collapsed) ---- */}
-      <CollapsibleSection title="Import Options" defaultOpen={false} testid="import">
+      <CollapsibleSection
+        title="Import Options"
+        description="Optional filtering applied when importing pairs (e.g. drop same-source pairs)."
+        defaultOpen={false}
+        testid="import"
+      >
         <div className="flex items-center justify-between">
           <Label htmlFor="source-prefix-filter">Filter imports by source prefix</Label>
           <Switch

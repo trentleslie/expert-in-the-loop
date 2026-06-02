@@ -192,7 +192,10 @@ function EntityCard({
             ID:{" "}
             <ExternalEntityLink
               id={id}
-              showExternalLinks={display.showExternalLinks}
+              // Only the TARGET entity gets the external link — the template is
+              // target-namespaced ({targetId}); linking the source id produced a
+              // bogus URL (finding #2). Alternatives below are target-side codes.
+              showExternalLinks={display.showExternalLinks && type === "target"}
               linkTemplate={display.linkTemplate}
             />
           </p>
@@ -233,40 +236,6 @@ function EntityCard({
         </div>
       </CardContent>
     </Card>
-  );
-}
-
-function ConfidenceIndicator({ confidence, model }: { confidence: number | null; model: string | null }) {
-  if (confidence === null) return null;
-
-  const getConfidenceColor = (conf: number) => {
-    if (conf >= 0.8) return "bg-green-500";
-    if (conf >= 0.6) return "bg-yellow-500";
-    return "bg-red-500";
-  };
-
-  return (
-    <div className="flex items-center justify-center gap-4 py-4" data-testid="container-confidence">
-      <div className="flex items-center gap-2">
-        <span className="text-sm text-muted-foreground">LLM Confidence:</span>
-        <div className="flex items-center gap-2">
-          <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
-            <div
-              className={`h-full ${getConfidenceColor(confidence)} transition-all`}
-              style={{ width: `${confidence * 100}%` }}
-            />
-          </div>
-          <span className="text-sm font-mono font-medium" data-testid="text-confidence-value">
-            {(confidence * 100).toFixed(0)}%
-          </span>
-        </div>
-      </div>
-      {model && (
-        <span className="text-xs text-muted-foreground">
-          ({model})
-        </span>
-      )}
-    </div>
   );
 }
 
@@ -428,6 +397,9 @@ export default function ReviewPage() {
       });
       refetchPair();
       queryClient.invalidateQueries({ queryKey: ["/api/users/me/stats"] });
+      // Casting a vote can re-tier the pair — refresh campaign progress (home)
+      // and the results browser, which prefix-match ["/api/campaigns"] (#11).
+      queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
     },
     onError: () => {
       toast({
@@ -773,12 +745,6 @@ export default function ReviewPage() {
                 </AccordionItem>
               )}
             </Accordion>
-
-            {/* Confidence indicator */}
-            <ConfidenceIndicator
-              confidence={pairData.pair.llmConfidence}
-              model={pairData.pair.llmModel}
-            />
 
             {/* Expert selection and notes */}
             <Card className="border-card-border">

@@ -87,6 +87,32 @@ type PairDetails = {
   skipCount: number;
 };
 
+/**
+ * Renders a pair's jsonb metadata as badges. Values are rendered as React text
+ * nodes (never HTML) — imported metadata can contain XSS payloads like
+ * `<img onerror=...>` / `<script>` and must stay inert.
+ */
+function MetadataBadges({ metadata }: { metadata: unknown }) {
+  if (!metadata || typeof metadata !== "object") return null;
+  const entries = Object.entries(metadata as Record<string, unknown>).filter(
+    ([, v]) => v !== "" && v != null,
+  );
+  if (entries.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1 mt-2">
+      {entries.map(([key, value]) => (
+        <Badge
+          key={key}
+          variant="secondary"
+          className="text-xs max-w-full break-words whitespace-normal font-normal"
+        >
+          {key}: {String(value)}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
 function SortIcon({
   field,
   sortField,
@@ -260,6 +286,7 @@ function PairDetailDialog({
                 <p className="text-xs font-mono text-muted-foreground mt-2">
                   ID: {data.pair.sourceId}
                 </p>
+                <MetadataBadges metadata={data.pair.sourceMetadata} />
               </div>
               <div className="p-4 rounded-lg bg-muted/50">
                 <p className="text-xs text-muted-foreground mb-1">TARGET</p>
@@ -281,6 +308,7 @@ function PairDetailDialog({
                     data.pair.targetId
                   )}
                 </p>
+                <MetadataBadges metadata={data.pair.targetMetadata} />
               </div>
             </div>
 
@@ -386,7 +414,7 @@ export default function ResultsBrowserPage() {
   const [selectedPairId, setSelectedPairId] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [exportFormat, setExportFormat] = useState<"csv" | "json">("csv");
+  const [exportFormat, setExportFormat] = useState<"csv" | "tsv" | "json">("csv");
   const [isExporting, setIsExporting] = useState(false);
 
   // Multi-select evidence-tier filter, initialized from the URL so a filtered
@@ -433,6 +461,12 @@ export default function ResultsBrowserPage() {
     },
     enabled: !!campaignId,
   });
+
+  // The reject/unsure/accept votes column only makes sense for binary campaigns.
+  // For numeric campaigns the server returns positive/negative = 0, so deriving
+  // unsure = voteCount - positive - negative would mislabel every numeric vote
+  // as "unsure" — show the plain vote count instead.
+  const isNumericCampaign = campaign?.config?.scoring?.mode === "numeric";
 
   const { data: results, isLoading } = useQuery<ResultsResponse>({
     queryKey: ["/api/campaigns", campaignId, "results", { page, search, consensus, minVotes, maxVotes }],
@@ -523,70 +557,22 @@ export default function ResultsBrowserPage() {
     setPage(1);
   };
 
+  // All formats (csv/tsv/json) are served by the single server-side serializer
+  // — the client no longer hand-rolls JSON (which used to drop evidence_status,
+  // resolution_layer, unsure_votes, etc). Exports are always the whole campaign.
   const handleExport = async () => {
     if (!campaignId) return;
     setIsExporting(true);
     try {
-      if (exportFormat === "csv") {
-        const res = await fetch(`/api/campaigns/${campaignId}/export`);
-        if (!res.ok) throw new Error("Export failed");
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${campaign?.name?.replace(/\s+/g, "_") ?? "export"}_export.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
-      } else {
-        const allPairs: PairResult[] = [];
-        let currentPage = 1;
-        let totalPages = 1;
-        do {
-          const params = new URLSearchParams({ page: currentPage.toString(), limit: "100" });
-          if (search) params.set("search", search);
-          if (consensus !== "all") params.set("consensus", consensus);
-          if (minVotes !== undefined) params.set("minVotes", minVotes.toString());
-          if (maxVotes !== undefined) params.set("maxVotes", maxVotes.toString());
-          const res = await fetch(`/api/campaigns/${campaignId}/results?${params}`);
-          if (!res.ok) throw new Error("Failed to fetch results for JSON export");
-          const data: ResultsResponse = await res.json();
-          allPairs.push(...data.pairs);
-          totalPages = data.totalPages;
-          currentPage++;
-        } while (currentPage <= totalPages);
-
-        const jsonContent = JSON.stringify(
-          {
-            campaign: campaign?.name ?? campaignId,
-            exportedAt: new Date().toISOString(),
-            total: allPairs.length,
-            pairs: allPairs.map((row) => ({
-              pair_id: row.pair.id,
-              source_text: row.pair.sourceText,
-              source_dataset: row.pair.sourceDataset,
-              source_id: row.pair.sourceId,
-              target_text: row.pair.targetText,
-              target_dataset: row.pair.targetDataset,
-              target_id: row.pair.targetId,
-              llm_confidence: row.pair.llmConfidence,
-              llm_model: row.pair.llmModel,
-              vote_count: row.voteCount,
-              positive_votes: row.positiveVotes,
-              negative_votes: row.negativeVotes,
-              positive_rate: row.positiveRate,
-            })),
-          },
-          null,
-          2
-        );
-        const blob = new Blob([jsonContent], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${campaign?.name?.replace(/\s+/g, "_") ?? "export"}_export.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
+      const res = await fetch(`/api/campaigns/${campaignId}/export?format=${exportFormat}`);
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${campaign?.name?.replace(/\s+/g, "_") ?? "export"}_export.${exportFormat}`;
+      a.click();
+      URL.revokeObjectURL(url);
     } catch (err) {
       console.error("Export error:", err);
     } finally {
@@ -823,11 +809,29 @@ export default function ResultsBrowserPage() {
                           </p>
                         </TableCell>
                         <TableCell className="text-center">
-                          <div className="flex items-center justify-center gap-1 text-sm">
-                            <span className="text-green-600">{row.positiveVotes}</span>
-                            <span>/</span>
-                            <span className="text-red-600">{row.negativeVotes}</span>
-                          </div>
+                          {isNumericCampaign ? (
+                            // Numeric: reject/unsure/accept doesn't apply — show
+                            // the scored-vote count (server reports 0 pos/neg).
+                            <span className="text-sm tabular-nums" title="numeric votes">
+                              {row.voteCount}
+                            </span>
+                          ) : (
+                            // Binary: reject / unsure / accept — matches the review
+                            // buttons (No Match · Unsure · Match). Unsure is derived
+                            // since /results returns only positive/negative counts.
+                            <div
+                              className="flex items-center justify-center gap-1 text-sm tabular-nums"
+                              title="reject / unsure / accept"
+                            >
+                              <span className="text-red-600">{row.negativeVotes}</span>
+                              <span className="text-muted-foreground">/</span>
+                              <span className="text-foreground">
+                                {Math.max(0, row.voteCount - row.positiveVotes - row.negativeVotes)}
+                              </span>
+                              <span className="text-muted-foreground">/</span>
+                              <span className="text-green-600">{row.positiveVotes}</span>
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="text-center text-sm text-muted-foreground">
                           {row.skipCount}
@@ -890,13 +894,14 @@ export default function ResultsBrowserPage() {
         <div className="flex items-center justify-end gap-2">
           <Select
             value={exportFormat}
-            onValueChange={(v) => setExportFormat(v as "csv" | "json")}
+            onValueChange={(v) => setExportFormat(v as "csv" | "tsv" | "json")}
           >
             <SelectTrigger className="w-28" data-testid="select-export-format">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="csv">CSV</SelectItem>
+              <SelectItem value="tsv">TSV</SelectItem>
               <SelectItem value="json">JSON</SelectItem>
             </SelectContent>
           </Select>

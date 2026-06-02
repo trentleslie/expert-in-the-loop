@@ -1,0 +1,15 @@
+source_text,source_dataset,source_id,target_name,target_db,hmdb_id,match_provenance,confidence_score,model,reasoning,kegg_id,pubchem_cid,curator_note
+D-Glucose,NMR_panel,SRC001,D-Glucose,HMDB,HMDB0000122,authoritative_xref,0.98,gpt-4o,Exact name and formula match (C6H12O6),C00031,5793,clean match
+Citric acid,NMR_panel,SRC002,Citrate,HMDB,HMDB0000094,ai_assisted,0.91,gpt-4o,Citric acid is the protonated form of citrate,C00158,311,
+L-Alanine,LCMS_pos,SRC003,L-Alanine,HMDB,HMDB0000161,manual,0.95,claude-opus-4,Curator-confirmed amino acid match,C00041,5950,verified by curator
+β-Alanine,LCMS_pos,SRC004,beta-Alanine,HMDB,HMDB0000056,ai_assisted,0.88,gpt-4o,β vs beta naming variant; same compound,C00099,239,unicode name test
+α-Ketoglutaric acid,LCMS_neg,SRC005,2-Oxoglutarate,HMDB,HMDB0000208,ai_assisted,0.62,gpt-4o,Synonym relationship plausible but not certain,C00026,51,ambiguous - good for an 'unsure' vote
+Caffeine,LCMS_pos,SRC006,Caffeine,HMDB,HMDB0001847,authoritative_xref,0.99,gpt-4o,Direct xref from source DB,C07481,2519,
+Unknown peak m/z 180.063,LCMS_pos,SRC007,D-Glucose,HMDB,HMDB0000122,ai_assisted,0.41,gpt-4o,Mass-only guess; weak evidence,,,low-confidence - good for a 'no match' vote
+Lactic acid,NMR_panel,SRC008,L-Lactic acid,HMDB,HMDB0000190,manual,0.93,claude-opus-4,Stereochemistry assumed L,C00186,612,
+Cholesterol,LCMS_pos,SRC009,Cholesterol,HMDB,HMDB0000067,manual,0.90,gpt-4o,"@SUM(A1:A9)",C00187,5997,"=1+1"
+Creatinine,NMR_panel,SRC010,Creatinine,HMDB,HMDB0000562,authoritative_xref,0.97,gpt-4o,"<img src=x onerror=alert(1)>",C00791,588,"<script>alert('xss')</script>"
+Provisional metabolite X,LCMS_neg,SRC011,Provisional match X,HMDB,"HMDB0000999 (provisional)",,0.50,gpt-4o,Target ID has a space and parens to exercise URL-encoding in the link template,,,encode test
+Pyruvate,NMR_panel,SRC012,Pyruvic acid,HMDB,HMDB0000243,,0.84,gpt-4o,"Match supported by formula, retention time, and MS/MS; ""high"" confidence",C00022,1060,"note with, a comma and ""quotes"""
+Urea,NMR_panel,SRC013,Urea,HMDB,HMDB0000294,authoritative_xref,0.96,gpt-4o,Direct match,C00086,1176,
+Sodium chloride,LCMS_pos,SRC014,D-Glucose,HMDB,HMDB0000122,ai_assisted,0.20,gpt-4o,Clearly unrelated; salt vs sugar,,,obvious non-match for a 'no match' vote

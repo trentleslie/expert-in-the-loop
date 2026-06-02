@@ -54,7 +54,7 @@ import {
   Search,
   Settings,
   ChevronDown,
-  ChevronRight,
+  ChevronUp,
   AlertTriangle,
   CheckCircle2,
 } from "lucide-react";
@@ -146,7 +146,9 @@ function CampaignTypeCombobox({ value, onChange }: { value: string; onChange: (v
 function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
   const [open, setOpen] = useState(false);
   const [config, setConfig] = useState<CampaignConfig>(DEFAULT_CAMPAIGN_CONFIG);
-  const [configOpen, setConfigOpen] = useState(false);
+  // Open by default on create so the (now self-describing) config sections are
+  // visible without a click — admins configure infrequently (finding #5 follow-up).
+  const [configOpen, setConfigOpen] = useState(true);
   const { toast } = useToast();
 
   const form = useForm<CreateCampaignForm>({
@@ -167,7 +169,7 @@ function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
       setOpen(false);
       form.reset();
       setConfig(DEFAULT_CAMPAIGN_CONFIG);
-      setConfigOpen(false);
+      setConfigOpen(true);
       onSuccess();
     },
     onError: () => {
@@ -287,7 +289,7 @@ function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
                     <Settings className="w-4 h-4" />
                     Configure scoring &amp; display
                   </span>
-                  {configOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  {configOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
               </CollapsibleTrigger>
               <CollapsibleContent className="p-3 pt-0">
@@ -435,8 +437,12 @@ function EditConfigDialog({
   // Load the campaign's stored config (or the default) when the dialog opens.
   // GET /api/campaigns/:id returns a base Campaign (which already carries
   // config + recomputeStatus) — no need to widen to CampaignWithStats.
+  // Single-string key so the default getQueryFn fetches the DETAIL endpoint
+  // (`/api/campaigns/:id`). A ["/api/campaigns", id] key would fetch the LIST
+  // endpoint and drop the id, making the editor load defaults and clobber the
+  // saved config on save (the #5 bug).
   const { data: fullCampaign } = useQuery<Campaign>({
-    queryKey: ["/api/campaigns", campaign.id],
+    queryKey: [`/api/campaigns/${campaign.id}`],
     enabled: open,
   });
 
@@ -748,6 +754,10 @@ export default function AdminCampaigns() {
 
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
+    // Status/config/archive changes re-tier evidence and gate voting — refresh
+    // the reviewer-facing lists too so they don't show stale state (#11).
+    queryClient.invalidateQueries({ queryKey: ["/api/users/me/votes"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/users/me/stats"] });
   };
 
   const groupedCampaigns = {

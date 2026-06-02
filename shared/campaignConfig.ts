@@ -130,6 +130,22 @@ export const campaignConfigSchema = campaignConfigBaseSchema.superRefine((cfg, c
 export type CampaignConfig = z.infer<typeof campaignConfigSchema>;
 
 /**
+ * Sensible default numeric consensus thresholds derived from the score range,
+ * used to pre-fill the config editor when a campaign switches to numeric mode.
+ * Guarantees the schema invariant `reject < confirm`, both within [min, max].
+ */
+export function defaultNumericThresholds(
+  min: number,
+  max: number,
+): { numericConfirmThreshold: number; numericRejectThreshold: number } {
+  const span = Math.max(0, max - min);
+  const reject = Math.round(min + span * 0.3);
+  let confirm = Math.round(min + span * 0.7);
+  if (confirm <= reject) confirm = Math.min(max, reject + 1);
+  return { numericConfirmThreshold: confirm, numericRejectThreshold: reject };
+}
+
+/**
  * Conservative default applied to new campaigns. minVotes:2 keeps a single
  * unanimous vote from auto-confirming a pair; 70/70 requires broad agreement.
  * Both are per-campaign tunable. Complete object so getCampaignConfig's
