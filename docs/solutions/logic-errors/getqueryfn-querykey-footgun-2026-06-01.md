@@ -131,6 +131,7 @@ it("drops extra key segments and warns (documents the footgun)", async () => {
 
 ## Related Issues
 
+- **Sequel / side effect:** [`single-string-querykey-escapes-list-prefix-invalidation-2026-06-02.md`](single-string-querykey-escapes-list-prefix-invalidation-2026-06-02.md) — the single-string-key fix below removed this query from `["/api/campaigns"]` list-prefix invalidation coverage, so under `staleTime: Infinity` the Configure dialog reopened stale. The "stale-cache hypothesis" ruled out above was correct for the *multi-segment* key, but the fix flipped it true. Re-validate "ruled out" notes when the code they describe changes.
 - QA findings: `docs/qa/2026-05-29-generalization-ui-qa-checklist.md` — finding **#5** (config clobber) and **#12** (analytics blank sections, same root cause).
 - Plan: `docs/plans/2026-06-01-001-fix-campaign-config-ux-plan.md` (Unit 1 + Unit 6).
 - Fix commits: `0f21dec` (config editor + dev guard + tests), `86bde0d` (analytics queries). Shipped in PR #8 (merge `68ccc06`).
