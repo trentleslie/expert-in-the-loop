@@ -462,6 +462,12 @@ export default function ResultsBrowserPage() {
     enabled: !!campaignId,
   });
 
+  // The reject/unsure/accept votes column only makes sense for binary campaigns.
+  // For numeric campaigns the server returns positive/negative = 0, so deriving
+  // unsure = voteCount - positive - negative would mislabel every numeric vote
+  // as "unsure" — show the plain vote count instead.
+  const isNumericCampaign = campaign?.config?.scoring?.mode === "numeric";
+
   const { data: results, isLoading } = useQuery<ResultsResponse>({
     queryKey: ["/api/campaigns", campaignId, "results", { page, search, consensus, minVotes, maxVotes }],
     queryFn: async () => {
@@ -803,21 +809,29 @@ export default function ResultsBrowserPage() {
                           </p>
                         </TableCell>
                         <TableCell className="text-center">
-                          {/* reject / unsure / accept — matches the review buttons
-                              (No Match · Unsure · Match). Unsure is derived since
-                              /results returns only positive/negative counts. */}
-                          <div
-                            className="flex items-center justify-center gap-1 text-sm tabular-nums"
-                            title="reject / unsure / accept"
-                          >
-                            <span className="text-red-600">{row.negativeVotes}</span>
-                            <span className="text-muted-foreground">/</span>
-                            <span className="text-foreground">
-                              {Math.max(0, row.voteCount - row.positiveVotes - row.negativeVotes)}
+                          {isNumericCampaign ? (
+                            // Numeric: reject/unsure/accept doesn't apply — show
+                            // the scored-vote count (server reports 0 pos/neg).
+                            <span className="text-sm tabular-nums" title="numeric votes">
+                              {row.voteCount}
                             </span>
-                            <span className="text-muted-foreground">/</span>
-                            <span className="text-green-600">{row.positiveVotes}</span>
-                          </div>
+                          ) : (
+                            // Binary: reject / unsure / accept — matches the review
+                            // buttons (No Match · Unsure · Match). Unsure is derived
+                            // since /results returns only positive/negative counts.
+                            <div
+                              className="flex items-center justify-center gap-1 text-sm tabular-nums"
+                              title="reject / unsure / accept"
+                            >
+                              <span className="text-red-600">{row.negativeVotes}</span>
+                              <span className="text-muted-foreground">/</span>
+                              <span className="text-foreground">
+                                {Math.max(0, row.voteCount - row.positiveVotes - row.negativeVotes)}
+                              </span>
+                              <span className="text-muted-foreground">/</span>
+                              <span className="text-green-600">{row.positiveVotes}</span>
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="text-center text-sm text-muted-foreground">
                           {row.skipCount}
