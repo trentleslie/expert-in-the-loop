@@ -14,6 +14,13 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient as qc } from "@/lib/queryClient";
 import { binaryVoteLabel, numericVoteLabel } from "@/lib/scoringLabels";
@@ -45,10 +52,12 @@ function formatDate(date: Date | string) {
 function VoteCard({
   vote,
   scoring,
+  campaignName,
   onEdit,
 }: {
   vote: VoteWithPair;
   scoring?: CampaignConfig["scoring"];
+  campaignName?: string;
   onEdit: (vote: VoteWithPair) => void;
 }) {
   const isLoinc = vote.pair.targetDataset?.toUpperCase() === "LOINC";
@@ -82,6 +91,11 @@ function VoteCard({
               ) : (
                 <Badge variant="secondary">
                   Score: {vote.scoreNumeric != null ? numericVoteLabel(scoring, vote.scoreNumeric) : "—"}
+                </Badge>
+              )}
+              {campaignName && (
+                <Badge variant="outline" className="text-xs font-normal">
+                  {campaignName}
                 </Badge>
               )}
               <span className="text-xs text-muted-foreground">
@@ -334,14 +348,16 @@ function EditVoteDialog({
 export default function VoteHistoryPage() {
   const [, setLocation] = useLocation();
   const [editingVote, setEditingVote] = useState<VoteWithPair | null>(null);
+  const [campaignFilter, setCampaignFilter] = useState<string>("all");
 
   const { data: votes, isLoading, isError } = useQuery<VoteWithPair[]>({
     queryKey: ["/api/users/me/votes"],
   });
 
   // Vote history spans multiple campaigns; fetch their configs so each vote is
-  // labelled with its own campaign's scoring labels (not hardcoded tier words).
-  const { data: campaigns } = useQuery<{ id: string; config: CampaignConfig | null }[]>({
+  // labelled with its own campaign's scoring labels (not hardcoded tier words),
+  // and its name (for the per-card indicator + the campaign filter).
+  const { data: campaigns } = useQuery<{ id: string; name: string; config: CampaignConfig | null }[]>({
     queryKey: ["/api/campaigns"],
   });
   const scoringByCampaign = useMemo(() => {
@@ -351,6 +367,34 @@ export default function VoteHistoryPage() {
     });
     return map;
   }, [campaigns]);
+  const nameByCampaign = useMemo(() => {
+    const map = new Map<string, string>();
+    campaigns?.forEach((c) => map.set(c.id, c.name));
+    return map;
+  }, [campaigns]);
+
+  // Only offer campaigns the user has actually voted in, in first-seen order.
+  const votedCampaigns = useMemo(() => {
+    const seen = new Map<string, string>();
+    votes?.forEach((v) => {
+      const id = v.pair.campaignId;
+      if (!seen.has(id)) seen.set(id, nameByCampaign.get(id) ?? id);
+    });
+    return Array.from(seen, ([id, name]) => ({ id, name }));
+  }, [votes, nameByCampaign]);
+
+  // Reset a stale filter (e.g. all votes in the selected campaign were superseded
+  // away on another device) so the list never silently shows empty.
+  useEffect(() => {
+    if (campaignFilter !== "all" && !votedCampaigns.some((c) => c.id === campaignFilter)) {
+      setCampaignFilter("all");
+    }
+  }, [campaignFilter, votedCampaigns]);
+
+  const visibleVotes = useMemo(
+    () => (campaignFilter === "all" ? votes : votes?.filter((v) => v.pair.campaignId === campaignFilter)),
+    [votes, campaignFilter],
+  );
 
   if (isLoading) {
     return (
@@ -406,9 +450,25 @@ export default function VoteHistoryPage() {
               Vote History
             </h1>
             <p className="text-sm text-muted-foreground">
-              {votes?.length || 0} votes total
+              {visibleVotes?.length || 0} vote{(visibleVotes?.length || 0) === 1 ? "" : "s"}
+              {campaignFilter === "all" ? " total" : " in this campaign"}
             </p>
           </div>
+          {votedCampaigns.length > 1 && (
+            <Select value={campaignFilter} onValueChange={setCampaignFilter}>
+              <SelectTrigger className="w-56 ml-auto" data-testid="select-campaign-filter">
+                <SelectValue placeholder="All campaigns" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All campaigns</SelectItem>
+                {votedCampaigns.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
 
         {votes && votes.length === 0 ? (
@@ -424,11 +484,12 @@ export default function VoteHistoryPage() {
           </Card>
         ) : (
           <div className="space-y-4">
-            {votes?.map((vote) => (
+            {visibleVotes?.map((vote) => (
               <VoteCard
                 key={vote.id}
                 vote={vote}
                 scoring={scoringByCampaign.get(vote.pair.campaignId)}
+                campaignName={nameByCampaign.get(vote.pair.campaignId)}
                 onEdit={setEditingVote}
               />
             ))}
