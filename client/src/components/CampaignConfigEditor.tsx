@@ -104,6 +104,40 @@ export function CampaignConfigEditor({
   const setScoring = (scoring: CampaignConfig["scoring"]) => {
     if (scoring.mode === "binary") setSavedBinary(scoring);
     else setSavedNumeric(scoring);
+
+    // Follow the range: when the numeric min/max changes and the consensus
+    // thresholds are still the values we auto-seeded for the OLD range (i.e.
+    // the user hasn't customized them), re-seed for the new range — so widening
+    // 1–5 → 1–20 moves the 30/70 marks from 2/4 to 7/14 instead of leaving a
+    // stale 2/4 that makes no sense on the new scale. Manually-edited thresholds
+    // are left untouched.
+    if (
+      value.scoring.mode === "numeric" &&
+      scoring.mode === "numeric" &&
+      (value.scoring.numeric.min !== scoring.numeric.min ||
+        value.scoring.numeric.max !== scoring.numeric.max)
+    ) {
+      const prev = defaultNumericThresholds(value.scoring.numeric.min, value.scoring.numeric.max);
+      const untouched =
+        value.consensus.numericConfirmThreshold == null ||
+        value.consensus.numericRejectThreshold == null ||
+        (value.consensus.numericConfirmThreshold === prev.numericConfirmThreshold &&
+          value.consensus.numericRejectThreshold === prev.numericRejectThreshold);
+      if (untouched) {
+        const next = defaultNumericThresholds(scoring.numeric.min, scoring.numeric.max);
+        onChange({
+          ...value,
+          scoring,
+          consensus: {
+            ...value.consensus,
+            numericConfirmThreshold: next.numericConfirmThreshold,
+            numericRejectThreshold: next.numericRejectThreshold,
+          },
+        });
+        return;
+      }
+    }
+
     onChange({ ...value, scoring });
   };
 
