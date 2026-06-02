@@ -159,7 +159,13 @@ type VotesOverTime = {
 
 const COLORS = ["hsl(var(--primary))", "hsl(var(--muted-foreground))", "hsl(var(--destructive))", "hsl(var(--accent))", "hsl(var(--secondary))"];
 
-function CampaignCard({ campaign }: { campaign: CampaignSummary }) {
+function CampaignCard({
+  campaign,
+  onViewDetails,
+}: {
+  campaign: CampaignSummary;
+  onViewDetails?: () => void;
+}) {
   const statusColor = campaign.status === "active" ? "default" : campaign.status === "completed" ? "secondary" : "outline";
   
   return (
@@ -216,6 +222,19 @@ function CampaignCard({ campaign }: { campaign: CampaignSummary }) {
           <div className="text-xs text-muted-foreground">
             Last activity: {campaign.daysSinceLastActivity} days ago
           </div>
+        )}
+
+        {onViewDetails && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full mt-1"
+            onClick={onViewDetails}
+            data-testid={`button-view-details-${campaign.id}`}
+          >
+            <TrendingUp className="w-4 h-4 mr-2" />
+            View Details
+          </Button>
         )}
       </CardContent>
     </Card>
@@ -873,7 +892,7 @@ export default function AnalyticsDashboard() {
               <BarChart3 className="w-4 h-4 mr-2" />
               Overview
             </TabsTrigger>
-            <TabsTrigger value="campaign" data-testid="tab-campaign" disabled={!selectedCampaign}>
+            <TabsTrigger value="campaign" data-testid="tab-campaign">
               <TrendingUp className="w-4 h-4 mr-2" />
               Campaign Details
             </TabsTrigger>
@@ -920,14 +939,14 @@ export default function AnalyticsDashboard() {
               ) : campaigns && campaigns.length > 0 ? (
                 <div className="grid md:grid-cols-2 gap-4">
                   {campaigns.map((campaign) => (
-                    <div
+                    <CampaignCard
                       key={campaign.id}
-                      onClick={() => setSelectedCampaign(campaign.id)}
-                      className="cursor-pointer"
-                      data-testid={`card-campaign-${campaign.id}`}
-                    >
-                      <CampaignCard campaign={campaign} />
-                    </div>
+                      campaign={campaign}
+                      onViewDetails={() => {
+                        setSelectedCampaign(campaign.id);
+                        setActiveTab("campaign");
+                      }}
+                    />
                   ))}
                 </div>
               ) : (
@@ -939,23 +958,6 @@ export default function AnalyticsDashboard() {
               )}
             </div>
             
-            {selectedCampaign && (
-              <div className="p-4 bg-muted/50 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">
-                    Selected: <strong>{campaigns?.find(c => c.id === selectedCampaign)?.name}</strong>
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setActiveTab("campaign")}
-                    data-testid="button-view-details"
-                  >
-                    View Details
-                  </Button>
-                </div>
-              </div>
-            )}
           </TabsContent>
           
           <TabsContent value="campaign" className="space-y-6">
@@ -973,7 +975,15 @@ export default function AnalyticsDashboard() {
                 </SelectContent>
               </Select>
             </div>
-            
+
+            {!selectedCampaign && (
+              <Card className="border-card-border">
+                <CardContent className="py-12 text-center text-muted-foreground">
+                  Select a campaign above to view its detailed analytics.
+                </CardContent>
+              </Card>
+            )}
+
             {selectedCampaign && (
               <Tabs defaultValue="votes" className="space-y-4">
                 <TabsList>
