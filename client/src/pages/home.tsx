@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Link } from "wouter";
 import { useAuth } from "@/lib/auth";
+import { partitionByMembership } from "@/lib/campaignFocus";
 import type { CampaignWithStats, UserStats } from "@shared/schema";
 import {
   EVIDENCE_TIER_META,
@@ -233,7 +234,15 @@ export default function HomePage() {
     queryKey: ["/api/users/me/stats"],
   });
 
+  // Joined campaign ids drive the "Your campaigns" section. Single-string key
+  // (getQueryFn fetches queryKey[0]); the join mutation explicitly invalidates
+  // this exact key so the home refreshes after joining.
+  const { data: joinedIds } = useQuery<string[]>({
+    queryKey: ["/api/users/me/campaigns"],
+  });
+
   const activeCampaigns = campaigns?.filter(c => c.status === "active") || [];
+  const { joined, others } = partitionByMembership(activeCampaigns, joinedIds ?? []);
 
   return (
     <div className="min-h-screen bg-background">
@@ -283,32 +292,28 @@ export default function HomePage() {
           )}
         </div>
 
-        {/* Active Campaigns */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-medium text-foreground">Active Campaigns</h2>
-            {isAdmin && (
-              <Link href="/admin/campaigns">
-                <Button variant="outline" size="sm" data-testid="link-manage-campaigns">
-                  Manage Campaigns
-                </Button>
-              </Link>
-            )}
+        {/* Campaigns — your joined ones first, then browse all */}
+        {campaignsLoading ? (
+          <div className="space-y-4">
+            <h2 className="text-lg font-medium text-foreground">Your campaigns</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <CampaignSkeleton />
+              <CampaignSkeleton />
+              <CampaignSkeleton />
+            </div>
           </div>
-
-          {campaignsLoading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <CampaignSkeleton />
-              <CampaignSkeleton />
-              <CampaignSkeleton />
+        ) : activeCampaigns.length === 0 ? (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-medium text-foreground">Active Campaigns</h2>
+              {isAdmin && (
+                <Link href="/admin/campaigns">
+                  <Button variant="outline" size="sm" data-testid="link-manage-campaigns">
+                    Manage Campaigns
+                  </Button>
+                </Link>
+              )}
             </div>
-          ) : activeCampaigns.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {activeCampaigns.map((campaign) => (
-                <CampaignCard key={campaign.id} campaign={campaign} />
-              ))}
-            </div>
-          ) : (
             <Card className="border-card-border">
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <div className="p-3 rounded-full bg-muted mb-4">
@@ -318,13 +323,63 @@ export default function HomePage() {
                   No Active Campaigns
                 </h3>
                 <p className="text-sm text-muted-foreground text-center max-w-sm">
-                  There are no campaigns available for review at the moment. 
+                  There are no campaigns available for review at the moment.
                   Check back later or contact an administrator.
                 </p>
               </CardContent>
             </Card>
-          )}
-        </div>
+          </div>
+        ) : (
+          <>
+            {/* Your campaigns (joined) */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-medium text-foreground">Your campaigns</h2>
+                {isAdmin && (
+                  <Link href="/admin/campaigns">
+                    <Button variant="outline" size="sm" data-testid="link-manage-campaigns">
+                      Manage Campaigns
+                    </Button>
+                  </Link>
+                )}
+              </div>
+              {joined.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {joined.map((campaign) => (
+                    <CampaignCard key={campaign.id} campaign={campaign} />
+                  ))}
+                </div>
+              ) : (
+                <Card className="border-card-border" data-testid="card-no-joined-campaigns">
+                  <CardContent className="flex flex-col items-center justify-center py-10">
+                    <div className="p-3 rounded-full bg-muted mb-4">
+                      <ClipboardList className="w-6 h-6 text-muted-foreground" />
+                    </div>
+                    <h3 className="text-base font-medium text-foreground mb-1">
+                      You haven't joined any campaigns yet
+                    </h3>
+                    <p className="text-sm text-muted-foreground text-center max-w-sm">
+                      Open a campaign link shared by an admin to join it, or browse all
+                      active campaigns below.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
+            {/* Browse all (active campaigns not joined) */}
+            {others.length > 0 && (
+              <div className="space-y-4">
+                <h2 className="text-lg font-medium text-foreground">Browse all active campaigns</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {others.map((campaign) => (
+                    <CampaignCard key={campaign.id} campaign={campaign} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
 
         {/* Recent Activity */}
         {stats && stats.recentActivity && stats.recentActivity.length > 0 && (
