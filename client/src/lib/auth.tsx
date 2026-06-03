@@ -3,6 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 import type { User } from "@shared/schema";
 
 type AuthContextType = {
+  // DEGRADED-STATE CONTRACT: `user` may be null even when `isAuthenticated` is
+  // true. That happens when Clerk reports the visitor signed in but
+  // `/api/auth/me` failed (transient server error) — `error` is set in that
+  // case. Callers MUST null-guard `user` (or read `isAdmin`, which already
+  // guards) rather than assuming `isAuthenticated` implies a non-null `user`.
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
