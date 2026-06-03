@@ -47,7 +47,7 @@ Production currently runs Google OAuth on the pre-generalization schema. The new
 
 ### Relevant code, scripts, and patterns
 - **Authoritative migration sequence** (dev-proven, substitute prod names): `docs/solutions/workflow-issues/drizzle-destructive-migration-vs-auto-deploy-2026-05-29.md` — *the* reference for the on-box sequence; it explicitly notes this "recurs on the prod promotion."
-- `scripts/migration-001-generalize-schema.sql` — destructive (pair_type enum→text, DROP TYPE, drop `votes(pair_id,user_id)` unique). **Idempotent**, `BEGIN/COMMIT`.
+- `scripts/migration-001-generalize-schema.sql` — destructive (pair_type enum→text, DROP TYPE, drop `votes(pair_id,user_id)` unique). **Idempotent**, `BEGIN/COMMIT`. **To extend (Unit 1c):** also drop/re-add the five `users.id` FKs with `ON UPDATE CASCADE` so the auth ID-migration can't FK-violate.
 - `scripts/migration-001-rollback.sql` — schema rollback for migration-001.
 - `scripts/migration-002-archive-existing.sql` — sets all existing campaigns `status='archived'`. **Idempotent**.
 - `.github/workflows/deploy.yml` — `main` deploy: `npm ci && npm run build` → `systemctl restart expert-in-the-loop`. **Does not run `db:push`** (removed). **Gap:** unlike `deploy-dev.yml`, it does **not** source `VITE_` env vars before build — must be fixed for the Clerk publishable key (Unit 1).
@@ -84,9 +84,9 @@ Production currently runs Google OAuth on the pre-generalization schema. The new
 - **🔴 Archiving all current prod campaigns → the 413 votes are REAL WORK.** Keep the clean-slate archive, but **(a)** export all 5 campaigns to CSV before `migration-002` (Unit 3) as durable, portable insurance, and **(b)** get explicit **campaign-owner sign-off** that read-only archived access is acceptable. R1's "no data loss" is reframed below to mean rows-preserved, not work-continues.
 - **Email-verification guard → ADD IT** (Unit 1b, a small pre-promotion code change): require `primaryEmailAddress.verification.status === 'verified'` before `/api/auth/me` migrates a local user to a Clerk ID.
 
-### Surfaced by the 2026-06-02 review — NEED a decision before the window
-- **🔴 How to make the user-ID migration FK-safe (Unit 1c).** Choose **(A) `ON UPDATE CASCADE`** on the five `users.id` FKs (schema + migration-001 change, atomic, `updateUserId` stays trivial) vs **(B) transactional re-point** inside `updateUserId` (no schema change, more app code, must enumerate every referencing table). Recommendation: **(A)** — DB-enforced and atomic, less room for a missed table; the constraint surgery rides in the already-destructive `migration-001`. This is blocking — without it, no existing user can log in post-cutover.
-- **Re-examine clean-slate archive vs forward-migrate (product).** The review challenged the premise: since Unit 4 adds the new columns *with DEFAULTs*, forward-migrating the 5 existing campaigns into the new model looks technically plausible, so the archive freeze of 413 votes of in-flight work may be a convenience choice, not a necessity. Decide explicitly: (a) confirm migrate-in-place is genuinely infeasible (state why), or (b) evaluate it. Also confirm whether an exported archived campaign can be **re-imported to resume** validation (continuity), not just viewed — and collect owner sign-off as an *informed choice between options*, not after the decision is locked.
+### Surfaced by the 2026-06-02 review — RESOLVED (2026-06-02)
+- **🔴 FK-safe user-ID migration (Unit 1c) → approach A: `ON UPDATE CASCADE`.** Add `onUpdate:"cascade"` to the five `users.id` FKs in `shared/schema.ts` + drop/re-add them with CASCADE in `migration-001`. DB-enforced and atomic; `updateUserId` stays trivial; can't miss a table. Blocking prerequisite — without it no existing user can log in post-cutover.
+- **Archive vs forward-migrate → KEEP clean-slate archive.** Forward-migration was considered (the new columns get DEFAULTs, so it's technically plausible) but **rejected for this cutover**: it would add default-`config` backfill + `evidence_status` recompute from the 413 existing votes + old→new vote-semantics mapping — extra risk inside the window for campaigns that are being archived (preserved as rows), not reinterpreted. The existing 5 campaigns freeze read-only, CSV-exported with owner sign-off (Unit 3). **Continuity, if a specific campaign later needs it, is a separate post-cutover task** (re-create + CSV re-import) — not part of this promotion.
 
 ### Deferred to implementation
 - Exact maintenance-window time + reviewer notification — schedule at execution (off-hours; the cutover invalidates all sessions, so everyone re-logs-in via Clerk).
@@ -203,13 +203,11 @@ flowchart TB
 
 **Files:**
 - Modify: `server/storage.ts` (`updateUserId`, `getUserByEmail`)
-- Modify (if fix A): `shared/schema.ts` + `scripts/migration-001-generalize-schema.sql`
+- Modify: `shared/schema.ts` (add `onUpdate: "cascade"` to the 5 `users.id` FKs) + `scripts/migration-001-generalize-schema.sql` (drop/re-add those 5 FKs with `ON UPDATE CASCADE`)
 - Test: server test surface (see Unit 1b note on test infra)
 
 **Approach — two defects, both in the find-or-create path all prod users hit cold:**
-1. **🔴 FK-safe ID migration.** `updateUserId` runs `UPDATE users SET id = <clerkId>` while `campaigns.created_by`, `votes.user_id`, `pairs.added_by`, `skipped_pairs.user_id`, `import_templates.created_by` reference `users.id` with **no `ON UPDATE` rule (Postgres default `NO ACTION`)**. The update is **rejected by a foreign-key violation** for any user with referencing rows (all real users) → `/api/auth/me` 500 → can't log in. Dev never caught this (fresh/wiped users had no referencing rows). **Pick a fix (see Open decisions):**
-   - **(A) `ON UPDATE CASCADE`** on the five FKs — add `{ onUpdate: "cascade" }` to the `.references()` in `shared/schema.ts` and apply on prod by dropping/re-adding those constraints inside `migration-001` (it already does constraint surgery). DB re-points children atomically; `updateUserId` stays a one-liner. *Cost:* schema + migration change.
-   - **(B) Transactional re-point in `updateUserId`** — in one transaction: copy the user row to a new row keyed by the Clerk id, `UPDATE` each child table's user-FK old→new, delete the old row. No schema change; contained to one function. *Cost:* more app code; must enumerate every referencing table (a missed table orphans rows).
+1. **🔴 FK-safe ID migration.** `updateUserId` runs `UPDATE users SET id = <clerkId>` while `campaigns.created_by`, `votes.user_id`, `pairs.added_by`, `skipped_pairs.user_id`, `import_templates.created_by` reference `users.id` with **no `ON UPDATE` rule (Postgres default `NO ACTION`)**. The update is **rejected by a foreign-key violation** for any user with referencing rows (all real users) → `/api/auth/me` 500 → can't log in. Dev never caught this (fresh/wiped users had no referencing rows). **Decided (2026-06-02): approach A — `ON UPDATE CASCADE`.** Add `{ onUpdate: "cascade" }` to the five `.references(() => users.id)` calls in `shared/schema.ts`, and on prod **drop/re-add those five FK constraints with `ON UPDATE CASCADE` inside `migration-001`** (it already does constraint surgery). Postgres then re-points all child rows atomically when `updateUserId` changes the PK; the function stays a one-liner and can't "miss a table." Annotating `schema.ts` keeps `db:push` from seeing a constraint diff. Apply the same CASCADE on **dev** too (so dev/prod match and the dev QA pass exercises the migration path).
 2. **Case-insensitive email match.** `getUserByEmail` uses `eq(users.email, email)` (exact, case-sensitive). If Clerk/Google return different casing than the stored Google-OAuth email, the match misses → a **duplicate row is created defaulting `role:'reviewer'`**, silently demoting an admin. Normalize both sides (`lower(...)`) on match.
 
 **Test scenarios:**
@@ -285,7 +283,7 @@ flowchart TB
 2. `db-backup.sh manual pre-migration` (fresh dump with service stopped).
 3. Check out the new code on the box (so `scripts/` + new `schema.ts` are present before the service runs new code).
 4. `npm ci`.
-5. Run `migration-001` SQL (destructive, idempotent).
+5. Run `migration-001` SQL (destructive, idempotent) — now also re-creates the five `users.id` FKs with `ON UPDATE CASCADE` (Unit 1c) so the post-cutover auth ID-migration can't FK-violate.
 6. Source `.env`; **assert `DATABASE_URL` resolves to `expertloop`** (`psql "$DATABASE_URL" -c '\conninfo'`) so the push can't accidentally target a sibling DB on the shared box; then run `db:push`. **Use the prompt playbook captured in the Unit 3 dry-run** — for each new column answer **"create column"** (never "rename"/"truncate"); **confirm the plan is ADD-only** (ADD COLUMN / CREATE TABLE), **never `--force`**, no DROP of `session`. **ABORT to Unit 6 on any unexpected prompt** (the new columns are `NOT NULL DEFAULT`, so prompt wording can vary run-to-run — only the captured playbook against prod-shaped data is trusted).
 7. Run `migration-002` SQL (archive existing campaigns). *(See the open product decision — archiving freezes all current prod campaigns.)*
 8. `npm run build`.
