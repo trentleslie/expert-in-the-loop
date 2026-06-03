@@ -119,7 +119,7 @@ sudo systemctl restart expert-in-the-loop
 | `main` | `.github/workflows/deploy.yml` | `~/expert-in-the-loop/` | 5000 |
 | `dev` | `.github/workflows/deploy-dev.yml` | `~/expert-in-the-loop-dev/` | 5001 |
 
-Both workflows SSH into Lightsail, pull the branch, run `npm ci && npm run build`, restart the systemd service, and health-check. The dev workflow also sources `VITE_` env vars from `.env` before build (required for Clerk publishable key).
+Both workflows SSH into Lightsail, pull the branch, run `npm ci && npm run build`, restart the systemd service, and health-check. Both also source `VITE_` env vars from `.env` before build (required for the Clerk publishable key embedded in the client bundle).
 
 **Actions URL**: https://github.com/trentleslie/expert-in-the-loop/actions
 
@@ -212,6 +212,6 @@ Auth is managed by Clerk (`@clerk/express` + `@clerk/react`). Key configuration:
 - **CLI**: `npx clerk` (authenticated as `trentleslie@gmail.com`) — `config pull`, `config patch`, `api`, `apps list`
 - **Domain restriction**: Clerk Dashboard → Restrictions → Allowlist (`*@phenomehealth.org`). No server-side domain check.
 - **Roles**: Stored in Clerk `publicMetadata.role` (`reviewer` or `admin`). Exposed via custom session token claim. Manage via Dashboard or `npx clerk api /users/{id} -X PATCH -d '{"public_metadata":{"role":"admin"}}'`
-- **FAPI proxy**: `/api/__clerk` via `http-proxy-middleware` (production only; dev instances bypass proxy)
+- **Frontend API (custom domain)**: The production instance uses CNAME mode — `clerk.expertintheloop.io` (encoded in the `pk_live` publishable key) resolves to Clerk's FAPI. The client talks to it directly; **do not** set `VITE_CLERK_PROXY_URL` in production (proxy mode breaks attribution against a custom-domain instance). The `/api/__clerk` proxy middleware in `server/auth.ts` is dormant legacy and pending removal.
 - **Google OAuth**: Configured as a social connection in Clerk Dashboard (not in app code)
 - **User ID migration**: `/api/auth/me` handles find-or-create with email-based fallback for users with legacy Google OAuth IDs
