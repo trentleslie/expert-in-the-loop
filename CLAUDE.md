@@ -198,8 +198,8 @@ Dev `.env` on Lightsail (`/home/ubuntu/expert-in-the-loop-dev/.env`):
 `DATABASE_URL`, `NODE_ENV`, `PORT`, `APP_URL`, `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `VITE_CLERK_PUBLISHABLE_KEY`, `ALLOWED_EMAIL_DOMAINS`
 
 Production `.env` on Lightsail (`/home/ubuntu/expert-in-the-loop/.env`):
-`DATABASE_URL`, `NODE_ENV`, `PORT`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, `APP_URL`
-(Production still uses Google OAuth — will be updated when Clerk is promoted to production.)
+`DATABASE_URL`, `NODE_ENV`, `PORT`, `APP_URL`, `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `VITE_CLERK_PUBLISHABLE_KEY`
+(Production cut over to Clerk on 2026-06-03. The prod Clerk instance is **custom-domain (CNAME) mode** — `VITE_CLERK_PROXY_URL` must stay UNSET/commented or sign-in breaks with "unable to attribute this request"; the client talks to `clerk.expertintheloop.io` directly. Legacy `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`/`SESSION_SECRET` still sit in the file but are unused — pending cleanup + Google secret rotation.)
 
 **Note**: Express has `trust proxy` enabled for nginx `X-Forwarded-Proto` headers. The systemd `EnvironmentFile` does not handle special characters like `!` in values — use only alphanumeric passwords.
 

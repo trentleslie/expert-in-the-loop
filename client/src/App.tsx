@@ -25,7 +25,6 @@ import AdminUpload from "@/pages/admin/upload";
 import NotFound from "@/pages/not-found";
 
 const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
-const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
 
 function LoadingScreen() {
   return (
@@ -239,7 +238,6 @@ function App() {
   return (
     <ClerkProvider
       publishableKey={clerkPubKey}
-      proxyUrl={clerkProxyUrl}
       routerPush={(to) => setLocation(to)}
       routerReplace={(to) => setLocation(to, { replace: true })}
       signInUrl="/login"
