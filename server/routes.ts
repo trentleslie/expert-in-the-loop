@@ -320,12 +320,14 @@ export async function registerRoutes(
           // 400 (which row + column), not throw synchronously inside .map() and
           // surface as an opaque 500. Collect failures and reject as a batch —
           // mirrors the resolution_layer validation just below.
-          const metadataErrors: { index: number; column: string }[] = [];
+          // `row` is 1-based (row 1 = first data row after the header) so the
+          // error maps directly to the user's file without mental arithmetic.
+          const metadataErrors: { row: number; column: string }[] = [];
           const parseMetadataCell = (raw: string, column: string, index: number): any => {
             try {
               return JSON.parse(raw);
             } catch {
-              metadataErrors.push({ index, column });
+              metadataErrors.push({ row: index + 1, column });
               return null;
             }
           };
@@ -364,7 +366,7 @@ export async function registerRoutes(
 
           if (metadataErrors.length > 0) {
             return res.status(400).json({
-              message: "Invalid JSON in metadata column(s); each must be a valid JSON object.",
+              message: "Invalid JSON in metadata column(s); each cell must contain valid JSON.",
               errors: metadataErrors,
             });
           }
