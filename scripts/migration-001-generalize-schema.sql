@@ -73,8 +73,8 @@ END $$;
 -- (table, column) so a non-default constraint name is still handled.
 DO $$
 DECLARE
-  con_name text;
-  upd_type "char";
+  con_names text[];
+  upd_types "char"[];
   tbl text;
   col text;
   pairs_arr text[] := ARRAY[
@@ -90,7 +90,12 @@ BEGIN
     tbl := split_part(entry, ':', 1);
     col := split_part(entry, ':', 2);
 
-    SELECT conname, confupdtype INTO con_name, upd_type
+    -- Gather EVERY FK on (tbl.col) -> users.id. Expect exactly one. A plain
+    -- `SELECT INTO` would silently take the first on duplicates, so aggregate
+    -- and check: >1 means a prior aborted attempt left a stale constraint —
+    -- fail loudly rather than CASCADE-ing only one; 0 means absent (skip).
+    SELECT array_agg(conname), array_agg(confupdtype)
+      INTO con_names, upd_types
     FROM pg_constraint
     WHERE conrelid = tbl::regclass
       AND contype = 'f'
@@ -101,12 +106,20 @@ BEGIN
         WHERE attrelid = tbl::regclass AND attname = col
       );
 
-    -- Skip if the FK is absent (shouldn't happen) or already CASCADE.
-    IF con_name IS NOT NULL AND upd_type <> 'c' THEN
-      EXECUTE format('ALTER TABLE %I DROP CONSTRAINT %I', tbl, con_name);
+    IF con_names IS NULL THEN
+      CONTINUE;  -- no such FK (unexpected); nothing to alter
+    ELSIF array_length(con_names, 1) > 1 THEN
+      RAISE EXCEPTION
+        'Multiple FK constraints on %.% -> users.id (%); resolve the duplicate before migrating',
+        tbl, col, con_names;
+    END IF;
+
+    -- Exactly one. Skip if it is already ON UPDATE CASCADE (idempotent re-run).
+    IF upd_types[1] <> 'c' THEN
+      EXECUTE format('ALTER TABLE %I DROP CONSTRAINT %I', tbl, con_names[1]);
       EXECUTE format(
         'ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES users(id) ON UPDATE CASCADE',
-        tbl, con_name, col
+        tbl, con_names[1], col
       );
     END IF;
   END LOOP;
