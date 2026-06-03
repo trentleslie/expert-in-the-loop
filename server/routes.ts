@@ -316,7 +316,21 @@ export async function registerRoutes(
             "llm_model", "llm_reasoning",
           ]);
 
-          pairsData = records.map((row: any) => {
+          // A malformed JSON cell in a metadata column must yield a descriptive
+          // 400 (which row + column), not throw synchronously inside .map() and
+          // surface as an opaque 500. Collect failures and reject as a batch —
+          // mirrors the resolution_layer validation just below.
+          const metadataErrors: { index: number; column: string }[] = [];
+          const parseMetadataCell = (raw: string, column: string, index: number): any => {
+            try {
+              return JSON.parse(raw);
+            } catch {
+              metadataErrors.push({ index, column });
+              return null;
+            }
+          };
+
+          pairsData = records.map((row: any, index: number) => {
             const extraMetadata: Record<string, unknown> = {};
             for (const [key, value] of Object.entries(row)) {
               if (!STANDARD_COLS.has(key) && value !== "" && value != null) {
@@ -332,12 +346,14 @@ export async function registerRoutes(
               sourceDataset: row.source_dataset || "Unknown",
               sourceId: row.source_id,
               sourceMetadata: row.source_metadata
-                ? JSON.parse(row.source_metadata)
+                ? parseMetadataCell(row.source_metadata, "source_metadata", index)
                 : (Object.keys(extraMetadata).length > 0 ? extraMetadata : null),
               targetText: row.target_text,
               targetDataset: row.target_dataset || "Unknown",
               targetId: row.target_id,
-              targetMetadata: row.target_metadata ? JSON.parse(row.target_metadata) : null,
+              targetMetadata: row.target_metadata
+                ? parseMetadataCell(row.target_metadata, "target_metadata", index)
+                : null,
               llmConfidence: row.llm_confidence
                 ? parseFloat(row.llm_confidence)
                 : (row.confidence_score ? parseFloat(row.confidence_score) : null),
@@ -345,6 +361,13 @@ export async function registerRoutes(
               llmReasoning: row.llm_reasoning || null,
             };
           });
+
+          if (metadataErrors.length > 0) {
+            return res.status(400).json({
+              message: "Invalid JSON in metadata column(s); each must be a valid JSON object.",
+              errors: metadataErrors,
+            });
+          }
         }
       }
 
