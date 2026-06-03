@@ -53,6 +53,18 @@ export async function registerRoutes(
         if (existingByEmail) {
           // Migrate: update the old ID to the new Clerk ID
           await storage.updateUserId(existingByEmail.id, userId);
+          // Sync the authoritative DB role into Clerk publicMetadata so
+          // requireAdmin (which reads the session-token `role` claim, NOT the DB)
+          // recognizes migrated admins. Without this, every existing admin loses
+          // admin at the Google->Clerk cutover until manually re-granted. The
+          // current token was minted before this runs, so it takes effect on the
+          // next token refresh / reload. Only writes when the Clerk value differs.
+          const clerkRole = (clerkUser.publicMetadata as Record<string, unknown>)?.role;
+          if (existingByEmail.role && clerkRole !== existingByEmail.role) {
+            await clerkClient.users.updateUser(userId, {
+              publicMetadata: { role: existingByEmail.role },
+            });
+          }
           user = await storage.getUser(userId);
         } else {
           user = await storage.createUser({
