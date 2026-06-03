@@ -66,6 +66,27 @@ export async function registerRoutes(
           });
         }
       }
+
+      // Reconcile the Clerk session-token `role` claim with the authoritative DB
+      // role on EVERY login. requireAdmin reads `sessionClaims.role` (not the DB),
+      // so this is what actually gates admin. Comparing the claim we already have
+      // (no extra Clerk fetch) makes the cutover role-grant **self-healing**: if a
+      // prior sync failed, the next login retries because the token still lacks
+      // the claim. Isolated in its own try/catch so a transient Clerk API error
+      // can't 500 the auth check or block the user from getting their account
+      // (the worst case is they retry on their next login). Not bound to the
+      // once-per-user migrate branch, so a single failed write is never permanent.
+      const claimRole = (auth.sessionClaims as Record<string, unknown> | undefined)?.role;
+      if (user && user.role && claimRole !== user.role) {
+        try {
+          await clerkClient.users.updateUserMetadata(userId, {
+            publicMetadata: { role: user.role },
+          });
+        } catch (syncError) {
+          console.error("[auth] Failed to sync role to Clerk (will retry next login):", syncError);
+        }
+      }
+
       return res.json({ user });
     } catch (error) {
       console.error("Error fetching user:", error);
@@ -653,8 +674,10 @@ export async function registerRoutes(
       if (!["reviewer", "admin"].includes(role)) {
         return res.status(400).json({ message: "Invalid role" });
       }
-      // Update Clerk publicMetadata (authoritative source for role)
-      await clerkClient.users.updateUser(req.params.id, {
+      // Update Clerk publicMetadata (authoritative source for role).
+      // updateUserMetadata MERGES; updateUser({publicMetadata}) would replace
+      // the whole object and drop any other keys.
+      await clerkClient.users.updateUserMetadata(req.params.id, {
         publicMetadata: { role },
       });
       // Update local DB (cache/audit)
