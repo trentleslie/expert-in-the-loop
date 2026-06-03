@@ -53,20 +53,6 @@ export async function registerRoutes(
         if (existingByEmail) {
           // Migrate: update the old ID to the new Clerk ID
           await storage.updateUserId(existingByEmail.id, userId);
-          // Sync the authoritative DB role into Clerk publicMetadata so
-          // requireAdmin (which reads the session-token `role` claim, NOT the DB)
-          // recognizes migrated admins. Without this, every existing admin loses
-          // admin at the Google->Clerk cutover until manually re-granted. The
-          // current token was minted before this runs, so it takes effect on the
-          // next token refresh / reload. Only writes when the Clerk value differs.
-          const clerkRole = (clerkUser.publicMetadata as Record<string, unknown>)?.role;
-          if (existingByEmail.role && clerkRole !== existingByEmail.role) {
-            // updateUserMetadata MERGES — updateUser({publicMetadata}) would
-            // replace the whole object and drop any other keys.
-            await clerkClient.users.updateUserMetadata(userId, {
-              publicMetadata: { role: existingByEmail.role },
-            });
-          }
           user = await storage.getUser(userId);
         } else {
           user = await storage.createUser({
@@ -80,6 +66,27 @@ export async function registerRoutes(
           });
         }
       }
+
+      // Reconcile the Clerk session-token `role` claim with the authoritative DB
+      // role on EVERY login. requireAdmin reads `sessionClaims.role` (not the DB),
+      // so this is what actually gates admin. Comparing the claim we already have
+      // (no extra Clerk fetch) makes the cutover role-grant **self-healing**: if a
+      // prior sync failed, the next login retries because the token still lacks
+      // the claim. Isolated in its own try/catch so a transient Clerk API error
+      // can't 500 the auth check or block the user from getting their account
+      // (the worst case is they retry on their next login). Not bound to the
+      // once-per-user migrate branch, so a single failed write is never permanent.
+      const claimRole = (auth.sessionClaims as Record<string, unknown> | undefined)?.role;
+      if (user && user.role && claimRole !== user.role) {
+        try {
+          await clerkClient.users.updateUserMetadata(userId, {
+            publicMetadata: { role: user.role },
+          });
+        } catch (syncError) {
+          console.error("[auth] Failed to sync role to Clerk (will retry next login):", syncError);
+        }
+      }
+
       return res.json({ user });
     } catch (error) {
       console.error("Error fetching user:", error);
