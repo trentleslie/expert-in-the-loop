@@ -61,7 +61,9 @@ export async function registerRoutes(
           // next token refresh / reload. Only writes when the Clerk value differs.
           const clerkRole = (clerkUser.publicMetadata as Record<string, unknown>)?.role;
           if (existingByEmail.role && clerkRole !== existingByEmail.role) {
-            await clerkClient.users.updateUser(userId, {
+            // updateUserMetadata MERGES — updateUser({publicMetadata}) would
+            // replace the whole object and drop any other keys.
+            await clerkClient.users.updateUserMetadata(userId, {
               publicMetadata: { role: existingByEmail.role },
             });
           }
@@ -665,8 +667,10 @@ export async function registerRoutes(
       if (!["reviewer", "admin"].includes(role)) {
         return res.status(400).json({ message: "Invalid role" });
       }
-      // Update Clerk publicMetadata (authoritative source for role)
-      await clerkClient.users.updateUser(req.params.id, {
+      // Update Clerk publicMetadata (authoritative source for role).
+      // updateUserMetadata MERGES; updateUser({publicMetadata}) would replace
+      // the whole object and drop any other keys.
+      await clerkClient.users.updateUserMetadata(req.params.id, {
         publicMetadata: { role },
       });
       // Update local DB (cache/audit)
