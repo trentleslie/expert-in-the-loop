@@ -14,6 +14,7 @@ import {
 import { storage } from "./storage";
 import { requireAuth, requireAdmin } from "./auth";
 import { resolveMigrationEmail } from "./authMigration";
+import { isCampaignJoinable } from "./campaignMembership";
 import { insertCampaignSchema, insertVoteSchema, type InsertPair } from "@shared/schema";
 import { RESOLUTION_LAYER_VALUES, campaignConfigSchema } from "@shared/campaignConfig";
 import { z } from "zod";
@@ -598,6 +599,40 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== CAMPAIGN MEMBERSHIP (reviewer focus) ====================
+
+  // Join a campaign via its shareable link (intentional-only association).
+  app.post("/api/campaigns/:id/join", requireAuth, async (req, res) => {
+    try {
+      const campaignId = req.params.id;
+      const userId = getAuth(req).userId!;
+      const campaign = await storage.getCampaign(campaignId);
+      if (!campaign) return res.status(404).json({ message: "Campaign not found" });
+      // Only active campaigns are joinable — draft/completed/archived joins would
+      // create memberships that never surface on the active-only reviewer home.
+      if (!isCampaignJoinable(campaign.status)) {
+        return res.status(403).json({ message: "Campaign is not open for joining" });
+      }
+      await storage.joinCampaign(campaignId, userId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error joining campaign:", error);
+      res.status(500).json({ message: "Failed to join campaign" });
+    }
+  });
+
+  // Roster of who has joined a campaign (membership-derived — includes
+  // joined-but-not-yet-voted reviewers, unlike the vote-derived analytics tab).
+  app.get("/api/campaigns/:id/roster", requireAdmin, async (req, res) => {
+    try {
+      const roster = await storage.getCampaignRoster(req.params.id);
+      res.json(roster);
+    } catch (error) {
+      console.error("Error fetching campaign roster:", error);
+      res.status(500).json({ message: "Failed to fetch campaign roster" });
+    }
+  });
+
   // ==================== USER ROUTES ====================
 
   // Get all users (admin only)
@@ -640,6 +675,20 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching user stats:", error);
       res.status(500).json({ message: "Failed to fetch user stats" });
+    }
+  });
+
+  // Get the campaign ids the current user has joined (drives the joined-first
+  // reviewer home). Named under /api/users/me/* so it can't be shadowed by
+  // GET /api/campaigns/:id (which would match :id="mine").
+  app.get("/api/users/me/campaigns", requireAuth, async (req, res) => {
+    try {
+      const userId = getAuth(req).userId!;
+      const ids = await storage.getJoinedCampaignIds(userId);
+      res.json(ids);
+    } catch (error) {
+      console.error("Error fetching joined campaigns:", error);
+      res.status(500).json({ message: "Failed to fetch joined campaigns" });
     }
   });
 
