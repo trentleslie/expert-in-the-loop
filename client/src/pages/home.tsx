@@ -14,7 +14,84 @@ import {
 } from "lucide-react";
 import { Link } from "wouter";
 import { useAuth } from "@/lib/auth";
+import { partitionByMembership } from "@/lib/campaignFocus";
 import type { CampaignWithStats, UserStats } from "@shared/schema";
+import {
+  EVIDENCE_TIER_META,
+  EVIDENCE_TIER_ORDER,
+} from "@/lib/evidenceTiers";
+
+/**
+ * Segmented evidence-tier progress bar for a campaign. Falls back to a flat
+ * percentage Progress when evidenceTiers is absent (older API responses / not
+ * tracked). The all-unreviewed case renders an all-grey bar with a "0% reviewed"
+ * summary rather than an empty bar.
+ */
+function EvidenceTierProgress({
+  campaign,
+  progress,
+}: {
+  campaign: CampaignWithStats;
+  progress: number;
+}) {
+  const tiers = campaign.evidenceTiers;
+
+  // No tier data available — fall back to the flat percentage bar.
+  if (!tiers) {
+    return (
+      <>
+        <Progress value={progress} className="h-2" />
+        <p className="text-xs text-muted-foreground text-right">{progress}% complete</p>
+      </>
+    );
+  }
+
+  const total = EVIDENCE_TIER_ORDER.reduce((sum, t) => sum + (tiers[t] ?? 0), 0);
+
+  return (
+    <>
+      <div
+        className="flex h-2 w-full overflow-hidden rounded-full bg-muted"
+        role="img"
+        aria-label={EVIDENCE_TIER_ORDER.map(
+          (t) => `${EVIDENCE_TIER_META[t].label}: ${tiers[t] ?? 0}`,
+        ).join(", ")}
+        data-testid={`evidence-bar-${campaign.id}`}
+      >
+        {total > 0 &&
+          EVIDENCE_TIER_ORDER.map((t) => {
+            const count = tiers[t] ?? 0;
+            if (count === 0) return null;
+            return (
+              <div
+                key={t}
+                style={{
+                  width: `${(count / total) * 100}%`,
+                  backgroundColor: EVIDENCE_TIER_META[t].barColor,
+                }}
+                title={`${EVIDENCE_TIER_META[t].label}: ${count}`}
+              />
+            );
+          })}
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        {EVIDENCE_TIER_ORDER.filter((t) => (tiers[t] ?? 0) > 0).map((t) => {
+          const Icon = EVIDENCE_TIER_META[t].icon;
+          return (
+            <span key={t} className="inline-flex items-center gap-1">
+              <Icon
+                className="w-3 h-3"
+                style={{ color: EVIDENCE_TIER_META[t].barColor }}
+              />
+              {tiers[t]} {EVIDENCE_TIER_META[t].label.toLowerCase()}
+            </span>
+          );
+        })}
+        {total === 0 && <span>No pairs yet</span>}
+      </div>
+    </>
+  );
+}
 
 function CampaignCard({ campaign }: { campaign: CampaignWithStats }) {
   const progress = campaign.totalPairs > 0 
@@ -76,8 +153,7 @@ function CampaignCard({ campaign }: { campaign: CampaignWithStats }) {
               {campaign.reviewedPairs} / {campaign.totalPairs} pairs
             </span>
           </div>
-          <Progress value={progress} className="h-2" />
-          <p className="text-xs text-muted-foreground text-right">{progress}% complete</p>
+          <EvidenceTierProgress campaign={campaign} progress={progress} />
         </div>
 
         <Link href={`/review/${campaign.id}`}>
@@ -158,7 +234,15 @@ export default function HomePage() {
     queryKey: ["/api/users/me/stats"],
   });
 
+  // Joined campaign ids drive the "Your campaigns" section. Single-string key
+  // (getQueryFn fetches queryKey[0]); the join mutation explicitly invalidates
+  // this exact key so the home refreshes after joining.
+  const { data: joinedIds } = useQuery<string[]>({
+    queryKey: ["/api/users/me/campaigns"],
+  });
+
   const activeCampaigns = campaigns?.filter(c => c.status === "active") || [];
+  const { joined, others } = partitionByMembership(activeCampaigns, joinedIds ?? []);
 
   return (
     <div className="min-h-screen bg-background">
@@ -208,32 +292,28 @@ export default function HomePage() {
           )}
         </div>
 
-        {/* Active Campaigns */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-medium text-foreground">Active Campaigns</h2>
-            {isAdmin && (
-              <Link href="/admin/campaigns">
-                <Button variant="outline" size="sm" data-testid="link-manage-campaigns">
-                  Manage Campaigns
-                </Button>
-              </Link>
-            )}
+        {/* Campaigns — your joined ones first, then browse all */}
+        {campaignsLoading ? (
+          <div className="space-y-4">
+            <h2 className="text-lg font-medium text-foreground">Your campaigns</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <CampaignSkeleton />
+              <CampaignSkeleton />
+              <CampaignSkeleton />
+            </div>
           </div>
-
-          {campaignsLoading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <CampaignSkeleton />
-              <CampaignSkeleton />
-              <CampaignSkeleton />
+        ) : activeCampaigns.length === 0 ? (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-medium text-foreground">Active Campaigns</h2>
+              {isAdmin && (
+                <Link href="/admin/campaigns">
+                  <Button variant="outline" size="sm" data-testid="link-manage-campaigns">
+                    Manage Campaigns
+                  </Button>
+                </Link>
+              )}
             </div>
-          ) : activeCampaigns.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {activeCampaigns.map((campaign) => (
-                <CampaignCard key={campaign.id} campaign={campaign} />
-              ))}
-            </div>
-          ) : (
             <Card className="border-card-border">
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <div className="p-3 rounded-full bg-muted mb-4">
@@ -243,13 +323,64 @@ export default function HomePage() {
                   No Active Campaigns
                 </h3>
                 <p className="text-sm text-muted-foreground text-center max-w-sm">
-                  There are no campaigns available for review at the moment. 
+                  There are no campaigns available for review at the moment.
                   Check back later or contact an administrator.
                 </p>
               </CardContent>
             </Card>
-          )}
-        </div>
+          </div>
+        ) : (
+          <>
+            {/* Your campaigns (joined) */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-medium text-foreground">Your campaigns</h2>
+                {isAdmin && (
+                  <Link href="/admin/campaigns">
+                    <Button variant="outline" size="sm" data-testid="link-manage-campaigns">
+                      Manage Campaigns
+                    </Button>
+                  </Link>
+                )}
+              </div>
+              {joined.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {joined.map((campaign) => (
+                    <CampaignCard key={campaign.id} campaign={campaign} />
+                  ))}
+                </div>
+              ) : (
+                <Card className="border-card-border" data-testid="card-no-joined-campaigns">
+                  <CardContent className="flex flex-col items-center justify-center py-10">
+                    <div className="p-3 rounded-full bg-muted mb-4">
+                      <ClipboardList className="w-6 h-6 text-muted-foreground" />
+                    </div>
+                    <h3 className="text-base font-medium text-foreground mb-1">
+                      You haven't joined any campaigns yet
+                    </h3>
+                    <p className="text-sm text-muted-foreground text-center max-w-sm">
+                      {isAdmin
+                        ? "Create or share a campaign from Manage Campaigns, or browse all active campaigns below."
+                        : "Open a campaign link shared by an admin to join it, or browse all active campaigns below."}
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
+            {/* Browse all (active campaigns not joined) */}
+            {others.length > 0 && (
+              <div className="space-y-4">
+                <h2 className="text-lg font-medium text-foreground">Browse all active campaigns</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {others.map((campaign) => (
+                    <CampaignCard key={campaign.id} campaign={campaign} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
 
         {/* Recent Activity */}
         {stats && stats.recentActivity && stats.recentActivity.length > 0 && (

@@ -35,7 +35,6 @@ import {
   LayoutDashboard,
   Database,
   History,
-  Globe,
   PieChart,
 } from "lucide-react";
 
@@ -49,7 +48,6 @@ const adminMenuItems = [
   { title: "Dashboard", url: "/admin", icon: LayoutDashboard },
   { title: "Campaigns", url: "/admin/campaigns", icon: ClipboardList },
   { title: "Database", url: "/admin/database", icon: Database },
-  { title: "Domains", url: "/admin/domains", icon: Globe },
   { title: "Users", url: "/admin/users", icon: Users },
   { title: "Settings", url: "/admin/settings", icon: Settings },
 ];
@@ -77,12 +75,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <SidebarHeader className="border-b border-sidebar-border px-4 py-3">
             <Link href="/">
               <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-md bg-primary">
-                  <Database className="w-4 h-4 text-primary-foreground" />
-                </div>
+                <img src="/favicon.png" alt="Phenome Health" className="w-6 h-6 shrink-0" />
                 <span className="font-semibold text-sm text-sidebar-foreground">
-                  Entity Validator
+                  Phenome Health
                 </span>
+                <span className="text-sm text-muted-foreground">/ EITL</span>
               </div>
             </Link>
           </SidebarHeader>

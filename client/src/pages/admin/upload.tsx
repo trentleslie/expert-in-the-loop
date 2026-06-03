@@ -171,6 +171,7 @@ function transformRowsToPairs(
       target_id: resolveEntryValue(row, mappings.targetId),
       target_dataset: resolveEntryValue(row, mappings.targetDataset),
       pair_type: pairType,
+      resolution_layer: resolveEntryValue(row, mappings.resolutionLayer) || undefined,
       llm_confidence: llmConfidence !== "" ? llmConfidence : undefined,
       llm_model: resolveEntryValue(row, mappings.llmModel) || undefined,
       llm_reasoning: resolveEntryValue(row, mappings.llmReasoning) || undefined,
@@ -765,7 +766,7 @@ export default function UploadPage() {
       const pairs = transformRowsToPairs(
         parsedData.rows,
         mappings,
-        campaign?.campaignType ?? "loinc_mapping"
+        campaign?.campaignType ?? "custom"
       );
 
       const response = await apiRequest(
@@ -782,6 +783,12 @@ export default function UploadPage() {
       queryClientHook.invalidateQueries({ queryKey: ["/api/campaigns"] });
       queryClientHook.invalidateQueries({
         queryKey: [`/api/campaigns/${campaignId}`],
+      });
+      // Newly imported pairs must appear in the review queue — invalidate the
+      // campaign's next-pair query (prefix match) so review isn't stuck on a
+      // stale empty result after import (#11).
+      queryClientHook.invalidateQueries({
+        queryKey: [`/api/campaigns/${campaignId}/next-pair`],
       });
     } catch (err: any) {
       const message =

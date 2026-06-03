@@ -36,6 +36,8 @@ export interface ColumnMappings {
   llmConfidence?: OptionalMappingEntry;
   llmModel?: OptionalMappingEntry;
   llmReasoning?: OptionalMappingEntry;
+  // Optional provenance
+  resolutionLayer?: OptionalMappingEntry;
   // Metadata / ignored
   sourceMetadataColumns: string[];
   targetMetadataColumns: string[];
@@ -69,6 +71,7 @@ function getAssignedColumns(mappings: ColumnMappings): Set<string> {
     | "llmConfidence"
     | "llmModel"
     | "llmReasoning"
+    | "resolutionLayer"
   >)[] = [
     "sourceText",
     "sourceId",
@@ -80,6 +83,7 @@ function getAssignedColumns(mappings: ColumnMappings): Set<string> {
     "llmConfidence",
     "llmModel",
     "llmReasoning",
+    "resolutionLayer",
   ];
 
   for (const key of fieldKeys) {
@@ -110,6 +114,7 @@ function fieldLabel(key: string): string {
     llmConfidence: "LLM Confidence",
     llmModel: "LLM Model",
     llmReasoning: "LLM Reasoning",
+    resolutionLayer: "Resolution Layer",
   };
   return labels[key] ?? key;
 }
@@ -126,6 +131,7 @@ function fieldDescription(key: string): string {
     llmConfidence: "LLM-predicted confidence score (0–1)",
     llmModel: "Name / version of the LLM used",
     llmReasoning: "LLM explanation for the mapping",
+    resolutionLayer: "Provenance tier (authoritative_xref, ai_assisted, manual, unspecified)",
   };
   return descs[key] ?? "";
 }
@@ -328,8 +334,8 @@ const REQUIRED_FIELDS: (keyof Pick<
 
 const OPTIONAL_FIELDS: (keyof Pick<
   ColumnMappings,
-  "llmConfidence" | "llmModel" | "llmReasoning"
->)[] = ["llmConfidence", "llmModel", "llmReasoning"];
+  "llmConfidence" | "llmModel" | "llmReasoning" | "resolutionLayer"
+>)[] = ["llmConfidence", "llmModel", "llmReasoning", "resolutionLayer"];
 
 export function ColumnMapper({
   columns,
@@ -361,7 +367,7 @@ export function ColumnMapper({
   // ── Optional field handlers ──────────────────────────────────────────────
 
   const handleOptionalChange =
-    (key: "llmConfidence" | "llmModel" | "llmReasoning") =>
+    (key: "llmConfidence" | "llmModel" | "llmReasoning" | "resolutionLayer") =>
     (entry: MappingEntry | OptionalMappingEntry) => {
       onMappingsChange({ ...mappings, [key]: entry });
     };
@@ -604,15 +610,13 @@ export function createDefaultMappings(columns: string[]): ColumnMappings {
     "targetText",
     "target_name",
     "targetName",
-    "loinc_name",
     "target"
   );
   const autoTargetId = find(
     "target_id",
     "targetId",
     "target_code",
-    "targetCode",
-    "loinc_code"
+    "targetCode"
   );
   const autoTargetDataset = find(
     "target_dataset",
@@ -633,6 +637,7 @@ export function createDefaultMappings(columns: string[]): ColumnMappings {
     "reasoning",
     "explanation"
   );
+  const autoResolutionLayer = find("resolution_layer", "resolutionLayer");
 
   const toEntry = (value: string): MappingEntry =>
     value ? { type: "column", value } : { ...blankEntry };
@@ -651,6 +656,7 @@ export function createDefaultMappings(columns: string[]): ColumnMappings {
     autoLlmConfidence,
     autoLlmModel,
     autoLlmReasoning,
+    autoResolutionLayer,
   ].filter(Boolean);
 
   const unassigned = columns.filter((c) => !assignedValues.includes(c));
@@ -666,6 +672,7 @@ export function createDefaultMappings(columns: string[]): ColumnMappings {
     llmConfidence: toOptional(autoLlmConfidence),
     llmModel: toOptional(autoLlmModel),
     llmReasoning: toOptional(autoLlmReasoning),
+    resolutionLayer: toOptional(autoResolutionLayer),
     sourceMetadataColumns: [],
     targetMetadataColumns: [],
     ignoredColumns: unassigned,

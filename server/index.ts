@@ -1,6 +1,8 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
+import { setupAuth } from "./auth";
 import { serveStatic } from "./static";
+import { storage } from "./storage";
 import { createServer } from "http";
 
 const app = express();
@@ -12,6 +14,9 @@ declare module "http" {
     rawBody: unknown;
   }
 }
+
+// Clerk FAPI proxy and middleware MUST be mounted before body parsers
+setupAuth(app);
 
 app.use(
   express.json({
@@ -61,6 +66,15 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Startup recovery: mark any campaign whose bulk recompute was interrupted by a
+  // crash (left in 'running') as 'failed', so the admin UI can offer a retry
+  // rather than leaving it permanently stuck. Non-fatal — log and continue.
+  try {
+    await storage.reconcileStaleRecomputes();
+  } catch (err) {
+    log(`reconcileStaleRecomputes failed at startup: ${String(err)}`);
+  }
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -23,6 +24,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -39,11 +45,18 @@ import {
   ThumbsUp,
   ThumbsDown,
   HelpCircle,
-  AlertTriangle,
-  Minus,
+  ListFilter,
   Download,
+  X,
 } from "lucide-react";
 import type { Campaign, Pair, Vote, User } from "@shared/schema";
+import type { EvidenceStatus } from "@shared/campaignConfig";
+import {
+  EVIDENCE_TIER_META,
+  EVIDENCE_TIER_ORDER,
+  EvidenceStatusBadge,
+  asEvidenceStatus,
+} from "@/lib/evidenceTiers";
 
 type SortField = "sourceText" | "targetText" | "voteCount" | "positiveRate" | null;
 type SortDirection = "asc" | "desc";
@@ -53,6 +66,7 @@ type PairResult = {
   voteCount: number;
   positiveVotes: number;
   negativeVotes: number;
+  meanScore: number | null;
   skipCount: number;
   positiveRate: number | null;
 };
@@ -64,42 +78,39 @@ type ResultsResponse = {
   totalPages: number;
 };
 
+type DetailVote = Vote & {
+  user: Pick<User, "id" | "email" | "displayName">;
+};
+
 type PairDetails = {
   pair: Pair;
-  votes: (Vote & { user: Pick<User, "id" | "email" | "displayName"> })[];
+  votes: DetailVote[];
   skipCount: number;
 };
 
-function ConsensusIndicator({ rate }: { rate: number | null }) {
-  if (rate === null) {
-    return (
-      <Badge variant="outline" className="gap-1">
-        <Minus className="w-3 h-3" />
-        Unreviewed
-      </Badge>
-    );
-  }
-  if (rate > 0.6) {
-    return (
-      <Badge className="gap-1 bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20">
-        <ThumbsUp className="w-3 h-3" />
-        Confirmed
-      </Badge>
-    );
-  }
-  if (rate < 0.4) {
-    return (
-      <Badge className="gap-1 bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20">
-        <ThumbsDown className="w-3 h-3" />
-        Rejected
-      </Badge>
-    );
-  }
+/**
+ * Renders a pair's jsonb metadata as badges. Values are rendered as React text
+ * nodes (never HTML) — imported metadata can contain XSS payloads like
+ * `<img onerror=...>` / `<script>` and must stay inert.
+ */
+function MetadataBadges({ metadata }: { metadata: unknown }) {
+  if (!metadata || typeof metadata !== "object") return null;
+  const entries = Object.entries(metadata as Record<string, unknown>).filter(
+    ([, v]) => v !== "" && v != null,
+  );
+  if (entries.length === 0) return null;
   return (
-    <Badge className="gap-1 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20">
-      <AlertTriangle className="w-3 h-3" />
-      Disagreement
-    </Badge>
+    <div className="flex flex-wrap gap-1 mt-2">
+      {entries.map(([key, value]) => (
+        <Badge
+          key={key}
+          variant="secondary"
+          className="text-xs max-w-full break-words whitespace-normal font-normal"
+        >
+          {key}: {String(value)}
+        </Badge>
+      ))}
+    </div>
   );
 }
 
@@ -150,15 +161,88 @@ function SortableHead({
   );
 }
 
+/** A single vote in the supersession chain. Superseded votes are de-emphasized. */
+function VoteRow({ vote, superseded }: { vote: DetailVote; superseded: boolean }) {
+  return (
+    <TableRow
+      className={superseded ? "opacity-50" : undefined}
+      data-testid={`row-vote-${vote.id}`}
+    >
+      <TableCell className="text-sm">
+        <div className="flex items-center gap-2">
+          {vote.user.displayName || vote.user.email}
+          {superseded && (
+            <Badge variant="outline" className="text-[10px] px-1 py-0">
+              Superseded
+            </Badge>
+          )}
+        </div>
+      </TableCell>
+      <TableCell>
+        {vote.scoringMode === "binary" ? (
+          vote.scoreBinary === "match" ? (
+            <ThumbsUp className="w-4 h-4 text-green-600" />
+          ) : vote.scoreBinary === "unsure" ? (
+            <HelpCircle className="w-4 h-4 text-yellow-600" />
+          ) : (
+            <ThumbsDown className="w-4 h-4 text-red-600" />
+          )
+        ) : (
+          <span className="font-mono">{vote.scoreNumeric}</span>
+        )}
+      </TableCell>
+      <TableCell className="text-sm text-muted-foreground">{vote.scoringMode}</TableCell>
+      <TableCell className="text-xs font-mono">{vote.expertSelectedCode || "-"}</TableCell>
+      <TableCell className="text-xs max-w-32 truncate">{vote.reviewerNotes || "-"}</TableCell>
+      <TableCell className="text-xs text-muted-foreground">
+        {new Date(vote.createdAt).toLocaleDateString()}
+      </TableCell>
+    </TableRow>
+  );
+}
+
+/**
+ * Resolve an admin-authored external link for a target id using the campaign's
+ * config.display.linkTemplate. Returns null when links are disabled, no
+ * template is configured, or the resulting URL is not https — in which case the
+ * caller renders the id as plain text. The shared schema already constrains
+ * linkTemplate to https:// + a {targetId} placeholder, but we re-validate the
+ * produced URL defensively and encode the interpolated id.
+ */
+function resolveTargetLink(
+  campaign: Campaign | undefined,
+  targetId: string | null,
+): string | null {
+  const display = campaign?.config?.display;
+  if (!display?.showExternalLinks || !display.linkTemplate || !targetId) {
+    return null;
+  }
+  const url = display.linkTemplate.replace(
+    /\{targetId\}/g,
+    encodeURIComponent(targetId),
+  );
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
 function PairDetailDialog({
   pairId,
+  campaign,
   open,
   onClose,
 }: {
   pairId: string | null;
+  campaign: Campaign | undefined;
   open: boolean;
   onClose: () => void;
 }) {
+  const [showSuperseded, setShowSuperseded] = useState(false);
+
   const { data, isLoading } = useQuery<PairDetails>({
     queryKey: ["/api/pairs", pairId, "details"],
     queryFn: async () => {
@@ -169,13 +253,23 @@ function PairDetailDialog({
     enabled: !!pairId && open,
   });
 
-  const isLoinc = data?.pair.targetDataset?.toUpperCase() === "LOINC";
+  const targetLink = resolveTargetLink(campaign, data?.pair.targetId ?? null);
+
+  const allVotes = data?.votes ?? [];
+  const activeVotes = allVotes.filter((v) => v.isActive !== false);
+  const supersededVotes = allVotes.filter((v) => v.isActive === false);
+  // Collapse superseded votes by default only when the chain is long (>=3 total).
+  const collapseSuperseded = allVotes.length >= 3 && supersededVotes.length > 0;
+  const supersededVisible = !collapseSuperseded || showSuperseded;
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-3xl max-h-[80vh] overflow-auto">
         <DialogHeader>
-          <DialogTitle>Pair Details</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            Pair Details
+            {data && <EvidenceStatusBadge status={data.pair.evidenceStatus} />}
+          </DialogTitle>
         </DialogHeader>
         {isLoading ? (
           <div className="space-y-4">
@@ -193,6 +287,7 @@ function PairDetailDialog({
                 <p className="text-xs font-mono text-muted-foreground mt-2">
                   ID: {data.pair.sourceId}
                 </p>
+                <MetadataBadges metadata={data.pair.sourceMetadata} />
               </div>
               <div className="p-4 rounded-lg bg-muted/50">
                 <p className="text-xs text-muted-foreground mb-1">TARGET</p>
@@ -200,9 +295,9 @@ function PairDetailDialog({
                 <p className="text-sm">{data.pair.targetText || "(No match)"}</p>
                 <p className="text-xs font-mono text-muted-foreground mt-2">
                   ID:{" "}
-                  {isLoinc ? (
+                  {targetLink ? (
                     <a
-                      href={`https://loinc.org/${data.pair.targetId}`}
+                      href={targetLink}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-primary hover:underline inline-flex items-center gap-1"
@@ -214,6 +309,7 @@ function PairDetailDialog({
                     data.pair.targetId
                   )}
                 </p>
+                <MetadataBadges metadata={data.pair.targetMetadata} />
               </div>
             </div>
 
@@ -233,21 +329,25 @@ function PairDetailDialog({
             <div>
               <div className="flex items-center justify-between mb-3">
                 <p className="text-sm font-medium">
-                  Votes ({data.votes.length}) | Skips ({data.skipCount})
+                  Votes ({activeVotes.length} active
+                  {supersededVotes.length > 0
+                    ? `, ${supersededVotes.length} superseded`
+                    : ""}
+                  ) | Skips ({data.skipCount})
                 </p>
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <span className="text-green-600">
-                    {data.votes.filter(v => v.scoreBinary === "match").length} positive
+                    {activeVotes.filter((v) => v.scoreBinary === "match").length} positive
                   </span>
                   <span className="text-red-600">
-                    {data.votes.filter(v => v.scoreBinary === "no_match").length} negative
+                    {activeVotes.filter((v) => v.scoreBinary === "no_match").length} negative
                   </span>
                   <span className="text-yellow-600">
-                    {data.votes.filter(v => v.scoreBinary === "unsure").length} unsure
+                    {activeVotes.filter((v) => v.scoreBinary === "unsure").length} unsure
                   </span>
                 </div>
               </div>
-              {data.votes.length > 0 ? (
+              {allVotes.length > 0 ? (
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -260,38 +360,34 @@ function PairDetailDialog({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {data.votes.map((vote) => (
-                      <TableRow key={vote.id}>
-                        <TableCell className="text-sm">
-                          {vote.user.displayName || vote.user.email}
-                        </TableCell>
-                        <TableCell>
-                          {vote.scoringMode === "binary" ? (
-                            vote.scoreBinary === "match" ? (
-                              <ThumbsUp className="w-4 h-4 text-green-600" />
-                            ) : vote.scoreBinary === "unsure" ? (
-                              <HelpCircle className="w-4 h-4 text-yellow-600" />
+                    {activeVotes.map((vote) => (
+                      <VoteRow key={vote.id} vote={vote} superseded={false} />
+                    ))}
+                    {collapseSuperseded && (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell colSpan={6} className="py-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs text-muted-foreground"
+                            onClick={() => setShowSuperseded((s) => !s)}
+                            data-testid="button-toggle-superseded"
+                          >
+                            {showSuperseded ? (
+                              <ChevronUp className="w-3 h-3 mr-1" />
                             ) : (
-                              <ThumbsDown className="w-4 h-4 text-red-600" />
-                            )
-                          ) : (
-                            <span className="font-mono">{vote.scoreNumeric}/5</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {vote.scoringMode}
-                        </TableCell>
-                        <TableCell className="text-xs font-mono">
-                          {vote.expertSelectedCode || "-"}
-                        </TableCell>
-                        <TableCell className="text-xs max-w-32 truncate">
-                          {vote.reviewerNotes || "-"}
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {new Date(vote.createdAt).toLocaleDateString()}
+                              <ChevronDown className="w-3 h-3 mr-1" />
+                            )}
+                            {showSuperseded ? "Hide" : "Show"} {supersededVotes.length}{" "}
+                            prior vote{supersededVotes.length === 1 ? "" : "s"}
+                          </Button>
                         </TableCell>
                       </TableRow>
-                    ))}
+                    )}
+                    {supersededVisible &&
+                      supersededVotes.map((vote) => (
+                        <VoteRow key={vote.id} vote={vote} superseded />
+                      ))}
                   </TableBody>
                 </Table>
               ) : (
@@ -319,8 +415,43 @@ export default function ResultsBrowserPage() {
   const [selectedPairId, setSelectedPairId] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [exportFormat, setExportFormat] = useState<"csv" | "json">("csv");
+  const [exportFormat, setExportFormat] = useState<"csv" | "tsv" | "json">("csv");
   const [isExporting, setIsExporting] = useState(false);
+
+  // Multi-select evidence-tier filter, initialized from the URL so a filtered
+  // view is shareable. Filtering is applied client-side over the loaded page
+  // (see filteredPairs) — no client-side consensus recompute.
+  const [evidenceFilter, setEvidenceFilter] = useState<EvidenceStatus[]>(() => {
+    const raw = new URLSearchParams(window.location.search).get("evidence");
+    if (!raw) return [];
+    return raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s): s is EvidenceStatus =>
+        (EVIDENCE_TIER_ORDER as string[]).includes(s),
+      );
+  });
+
+  // Reflect the selected statuses in the URL query params (shareable view).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (evidenceFilter.length > 0) {
+      params.set("evidence", evidenceFilter.join(","));
+    } else {
+      params.delete("evidence");
+    }
+    const qs = params.toString();
+    const next = `${window.location.pathname}${qs ? `?${qs}` : ""}`;
+    window.history.replaceState(null, "", next);
+  }, [evidenceFilter]);
+
+  const toggleEvidence = (status: EvidenceStatus) => {
+    setEvidenceFilter((prev) =>
+      prev.includes(status)
+        ? prev.filter((s) => s !== status)
+        : [...prev, status],
+    );
+  };
 
   const { data: campaign } = useQuery<Campaign>({
     queryKey: ["/api/campaigns", campaignId],
@@ -331,6 +462,12 @@ export default function ResultsBrowserPage() {
     },
     enabled: !!campaignId,
   });
+
+  // The reject/unsure/accept votes column only makes sense for binary campaigns.
+  // For numeric campaigns the server returns positive/negative = 0, so deriving
+  // unsure = voteCount - positive - negative would mislabel every numeric vote
+  // as "unsure" — show the plain vote count instead.
+  const isNumericCampaign = campaign?.config?.scoring?.mode === "numeric";
 
   const { data: results, isLoading } = useQuery<ResultsResponse>({
     queryKey: ["/api/campaigns", campaignId, "results", { page, search, consensus, minVotes, maxVotes }],
@@ -390,6 +527,19 @@ export default function ResultsBrowserPage() {
     });
   }, [results?.pairs, sortField, sortDirection]);
 
+  // Client-side evidence-tier filter over the loaded page (multi-select).
+  const filteredPairs = useMemo(() => {
+    if (evidenceFilter.length === 0) return sortedPairs;
+    return sortedPairs.filter((row) =>
+      evidenceFilter.includes(asEvidenceStatus(row.pair.evidenceStatus)),
+    );
+  }, [sortedPairs, evidenceFilter]);
+
+  // Distinguish "filter hides everything" from "campaign has no pairs at all".
+  const hasLoadedPairs = !!results && results.pairs.length > 0;
+  const filterHidAll =
+    hasLoadedPairs && filteredPairs.length === 0 && evidenceFilter.length > 0;
+
   const handleSort = (field: SortField) => {
     if (sortField === field) {
       setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
@@ -408,70 +558,22 @@ export default function ResultsBrowserPage() {
     setPage(1);
   };
 
+  // All formats (csv/tsv/json) are served by the single server-side serializer
+  // — the client no longer hand-rolls JSON (which used to drop evidence_status,
+  // resolution_layer, unsure_votes, etc). Exports are always the whole campaign.
   const handleExport = async () => {
     if (!campaignId) return;
     setIsExporting(true);
     try {
-      if (exportFormat === "csv") {
-        const res = await fetch(`/api/campaigns/${campaignId}/export`);
-        if (!res.ok) throw new Error("Export failed");
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${campaign?.name?.replace(/\s+/g, "_") ?? "export"}_export.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
-      } else {
-        const allPairs: PairResult[] = [];
-        let currentPage = 1;
-        let totalPages = 1;
-        do {
-          const params = new URLSearchParams({ page: currentPage.toString(), limit: "100" });
-          if (search) params.set("search", search);
-          if (consensus !== "all") params.set("consensus", consensus);
-          if (minVotes !== undefined) params.set("minVotes", minVotes.toString());
-          if (maxVotes !== undefined) params.set("maxVotes", maxVotes.toString());
-          const res = await fetch(`/api/campaigns/${campaignId}/results?${params}`);
-          if (!res.ok) throw new Error("Failed to fetch results for JSON export");
-          const data: ResultsResponse = await res.json();
-          allPairs.push(...data.pairs);
-          totalPages = data.totalPages;
-          currentPage++;
-        } while (currentPage <= totalPages);
-
-        const jsonContent = JSON.stringify(
-          {
-            campaign: campaign?.name ?? campaignId,
-            exportedAt: new Date().toISOString(),
-            total: allPairs.length,
-            pairs: allPairs.map((row) => ({
-              pair_id: row.pair.id,
-              source_text: row.pair.sourceText,
-              source_dataset: row.pair.sourceDataset,
-              source_id: row.pair.sourceId,
-              target_text: row.pair.targetText,
-              target_dataset: row.pair.targetDataset,
-              target_id: row.pair.targetId,
-              llm_confidence: row.pair.llmConfidence,
-              llm_model: row.pair.llmModel,
-              vote_count: row.voteCount,
-              positive_votes: row.positiveVotes,
-              negative_votes: row.negativeVotes,
-              positive_rate: row.positiveRate,
-            })),
-          },
-          null,
-          2
-        );
-        const blob = new Blob([jsonContent], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${campaign?.name?.replace(/\s+/g, "_") ?? "export"}_export.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
+      const res = await fetch(`/api/campaigns/${campaignId}/export?format=${exportFormat}`);
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${campaign?.name?.replace(/\s+/g, "_") ?? "export"}_export.${exportFormat}`;
+      a.click();
+      URL.revokeObjectURL(url);
     } catch (err) {
       console.error("Export error:", err);
     } finally {
@@ -520,18 +622,60 @@ export default function ResultsBrowserPage() {
                   />
                 </div>
               </div>
-              <Select value={consensus} onValueChange={(v) => { setConsensus(v); setPage(1); }}>
-                <SelectTrigger className="w-40" data-testid="select-consensus">
-                  <SelectValue placeholder="Consensus" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="match">Confirmed</SelectItem>
-                  <SelectItem value="no_match">Rejected</SelectItem>
-                  <SelectItem value="disagreement">Disagreement</SelectItem>
-                  <SelectItem value="unreviewed">Unreviewed</SelectItem>
-                </SelectContent>
-              </Select>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="gap-2"
+                    data-testid="button-evidence-filter"
+                  >
+                    <ListFilter className="w-4 h-4" />
+                    Evidence status
+                    {evidenceFilter.length > 0 && (
+                      <Badge variant="secondary" className="ml-1">
+                        {evidenceFilter.length}
+                      </Badge>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-56" align="start">
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Filter by evidence status
+                    </p>
+                    {EVIDENCE_TIER_ORDER.map((status) => {
+                      const meta = EVIDENCE_TIER_META[status];
+                      const Icon = meta.icon;
+                      return (
+                        <label
+                          key={status}
+                          className="flex items-center gap-2 text-sm cursor-pointer"
+                          data-testid={`checkbox-evidence-${status}`}
+                        >
+                          <Checkbox
+                            checked={evidenceFilter.includes(status)}
+                            onCheckedChange={() => toggleEvidence(status)}
+                          />
+                          <Icon className="w-3.5 h-3.5" />
+                          {meta.label}
+                        </label>
+                      );
+                    })}
+                    {evidenceFilter.length > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start text-xs"
+                        onClick={() => setEvidenceFilter([])}
+                        data-testid="button-clear-evidence"
+                      >
+                        <X className="w-3 h-3 mr-1" />
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
               <div className="flex items-center gap-2">
                 <Label htmlFor="min-votes" className="text-sm text-muted-foreground whitespace-nowrap">
                   Min votes
@@ -579,7 +723,28 @@ export default function ResultsBrowserPage() {
                   <Skeleton key={i} className="h-12" />
                 ))}
               </div>
-            ) : results && results.pairs.length > 0 ? (
+            ) : filterHidAll ? (
+              <div className="p-12 text-center text-muted-foreground space-y-3">
+                <p>
+                  No pairs with status{" "}
+                  <span className="font-medium">
+                    {evidenceFilter
+                      .map((s) => EVIDENCE_TIER_META[s].label)
+                      .join(", ")}
+                  </span>{" "}
+                  on this page — adjust the filter.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setEvidenceFilter([])}
+                  data-testid="button-clear-evidence-empty"
+                >
+                  <X className="w-3 h-3 mr-1" />
+                  Clear filter
+                </Button>
+              </div>
+            ) : hasLoadedPairs ? (
               <>
                 <Table>
                   <TableHeader>
@@ -613,19 +778,25 @@ export default function ResultsBrowserPage() {
                       </SortableHead>
                       <TableHead className="text-center">Skips</TableHead>
                       <TableHead>Consensus</TableHead>
-                      <SortableHead
-                        field="positiveRate"
-                        sortField={sortField}
-                        sortDirection={sortDirection}
-                        onSort={handleSort}
-                        className="text-right"
-                      >
-                        Agreement
-                      </SortableHead>
+                      {isNumericCampaign ? (
+                        // Numeric campaigns have no positive-rate "Agreement";
+                        // show the mean score instead.
+                        <TableHead className="text-right">Mean</TableHead>
+                      ) : (
+                        <SortableHead
+                          field="positiveRate"
+                          sortField={sortField}
+                          sortDirection={sortDirection}
+                          onSort={handleSort}
+                          className="text-right"
+                        >
+                          Agreement
+                        </SortableHead>
+                      )}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sortedPairs.map((row) => (
+                    {filteredPairs.map((row) => (
                       <TableRow
                         key={row.pair.id}
                         className="cursor-pointer hover-elevate"
@@ -645,20 +816,42 @@ export default function ResultsBrowserPage() {
                           </p>
                         </TableCell>
                         <TableCell className="text-center">
-                          <div className="flex items-center justify-center gap-1 text-sm">
-                            <span className="text-green-600">{row.positiveVotes}</span>
-                            <span>/</span>
-                            <span className="text-red-600">{row.negativeVotes}</span>
-                          </div>
+                          {isNumericCampaign ? (
+                            // Numeric: reject/unsure/accept doesn't apply — show
+                            // the scored-vote count (server reports 0 pos/neg).
+                            <span className="text-sm tabular-nums" title="numeric votes">
+                              {row.voteCount}
+                            </span>
+                          ) : (
+                            // Binary: reject / unsure / accept — matches the review
+                            // buttons (No Match · Unsure · Match). Unsure is derived
+                            // since /results returns only positive/negative counts.
+                            <div
+                              className="flex items-center justify-center gap-1 text-sm tabular-nums"
+                              title="reject / unsure / accept"
+                            >
+                              <span className="text-red-600">{row.negativeVotes}</span>
+                              <span className="text-muted-foreground">/</span>
+                              <span className="text-foreground">
+                                {Math.max(0, row.voteCount - row.positiveVotes - row.negativeVotes)}
+                              </span>
+                              <span className="text-muted-foreground">/</span>
+                              <span className="text-green-600">{row.positiveVotes}</span>
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="text-center text-sm text-muted-foreground">
                           {row.skipCount}
                         </TableCell>
                         <TableCell>
-                          <ConsensusIndicator rate={row.positiveRate} />
+                          <EvidenceStatusBadge status={row.pair.evidenceStatus} />
                         </TableCell>
                         <TableCell className="text-right text-sm font-mono">
-                          {row.positiveRate !== null
+                          {isNumericCampaign
+                            ? row.meanScore != null
+                              ? row.meanScore.toFixed(1)
+                              : "-"
+                            : row.positiveRate !== null
                             ? `${(row.positiveRate * 100).toFixed(0)}%`
                             : "-"}
                         </TableCell>
@@ -671,6 +864,8 @@ export default function ResultsBrowserPage() {
                   <p className="text-sm text-muted-foreground">
                     Showing {(page - 1) * 25 + 1}-{Math.min(page * 25, results.total)} of{" "}
                     {results.total} pairs
+                    {evidenceFilter.length > 0 &&
+                      ` (${filteredPairs.length} match the status filter on this page)`}
                   </p>
                   <div className="flex items-center gap-2">
                     <Button
@@ -701,7 +896,7 @@ export default function ResultsBrowserPage() {
               </>
             ) : (
               <div className="p-12 text-center text-muted-foreground">
-                No pairs found matching your filters.
+                This campaign has no pairs matching your search.
               </div>
             )}
           </CardContent>
@@ -710,13 +905,14 @@ export default function ResultsBrowserPage() {
         <div className="flex items-center justify-end gap-2">
           <Select
             value={exportFormat}
-            onValueChange={(v) => setExportFormat(v as "csv" | "json")}
+            onValueChange={(v) => setExportFormat(v as "csv" | "tsv" | "json")}
           >
             <SelectTrigger className="w-28" data-testid="select-export-format">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="csv">CSV</SelectItem>
+              <SelectItem value="tsv">TSV</SelectItem>
               <SelectItem value="json">JSON</SelectItem>
             </SelectContent>
           </Select>
@@ -734,6 +930,7 @@ export default function ResultsBrowserPage() {
 
       <PairDetailDialog
         pairId={selectedPairId}
+        campaign={campaign}
         open={!!selectedPairId}
         onClose={() => setSelectedPairId(null)}
       />

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,21 +24,45 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { 
-  Plus, 
-  MoreVertical, 
-  Upload, 
-  Download, 
-  Play, 
-  Pause, 
+import {
+  Plus,
+  MoreVertical,
+  Upload,
+  Download,
+  Play,
+  Pause,
   Archive,
   FileUp,
   Loader2,
   Search,
+  Settings,
+  ChevronDown,
+  ChevronUp,
+  AlertTriangle,
+  CheckCircle2,
+  Link2,
+  Users,
 } from "lucide-react";
-import type { CampaignWithStats } from "@shared/schema";
+import type { Campaign, CampaignWithStats } from "@shared/schema";
+import { CampaignConfigEditor } from "@/components/CampaignConfigEditor";
+import { DEFAULT_CAMPAIGN_CONFIG, campaignConfigSchema, type CampaignConfig } from "@shared/campaignConfig";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -123,6 +147,10 @@ function CampaignTypeCombobox({ value, onChange }: { value: string; onChange: (v
 
 function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
   const [open, setOpen] = useState(false);
+  const [config, setConfig] = useState<CampaignConfig>(DEFAULT_CAMPAIGN_CONFIG);
+  // Open by default on create so the (now self-describing) config sections are
+  // visible without a click — admins configure infrequently (finding #5 follow-up).
+  const [configOpen, setConfigOpen] = useState(true);
   const { toast } = useToast();
 
   const form = useForm<CreateCampaignForm>({
@@ -136,12 +164,14 @@ function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: CreateCampaignForm) => 
+    mutationFn: (data: CreateCampaignForm & { config: CampaignConfig }) =>
       apiRequest("POST", "/api/campaigns", data),
     onSuccess: () => {
       toast({ title: "Campaign created", description: "Your new campaign is ready for pairs." });
       setOpen(false);
       form.reset();
+      setConfig(DEFAULT_CAMPAIGN_CONFIG);
+      setConfigOpen(true);
       onSuccess();
     },
     onError: () => {
@@ -149,8 +179,14 @@ function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
     },
   });
 
+  const configValid = campaignConfigSchema.safeParse(config).success;
+
   const onSubmit = (data: CreateCampaignForm) => {
-    createMutation.mutate(data);
+    if (!configValid) {
+      toast({ title: "Invalid configuration", description: "Fix the scoring/display settings before creating.", variant: "destructive" });
+      return;
+    }
+    createMutation.mutate({ ...data, config });
   };
 
   return (
@@ -161,7 +197,7 @@ function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
           Create Campaign
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Create New Campaign</DialogTitle>
           <DialogDescription>
@@ -244,6 +280,24 @@ function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
                 </FormItem>
               )}
             />
+            <Collapsible open={configOpen} onOpenChange={setConfigOpen} className="border border-border rounded-md">
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between p-3 text-left"
+                  data-testid="button-toggle-config"
+                >
+                  <span className="flex items-center gap-2 text-sm font-medium">
+                    <Settings className="w-4 h-4" />
+                    Configure scoring &amp; display
+                  </span>
+                  {configOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="p-3 pt-0">
+                <CampaignConfigEditor value={config} onChange={setConfig} />
+              </CollapsibleContent>
+            </Collapsible>
             <DialogFooter>
               <Button 
                 type="button" 
@@ -365,9 +419,196 @@ function UploadPairsDialog({ campaignId, onSuccess }: { campaignId: string; onSu
   );
 }
 
+type ConfigSaveResult = { recomputed: number; recomputeStatus: string };
+
+function EditConfigDialog({
+  campaign,
+  open,
+  onOpenChange,
+  onUpdate,
+}: {
+  campaign: CampaignWithStats;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onUpdate: () => void;
+}) {
+  const { toast } = useToast();
+  const [config, setConfig] = useState<CampaignConfig>(DEFAULT_CAMPAIGN_CONFIG);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  // Load the campaign's stored config (or the default) when the dialog opens.
+  // GET /api/campaigns/:id returns a base Campaign (which already carries
+  // config + recomputeStatus) — no need to widen to CampaignWithStats.
+  // Single-string key so the default getQueryFn fetches the DETAIL endpoint
+  // (`/api/campaigns/:id`). A ["/api/campaigns", id] key would fetch the LIST
+  // endpoint and drop the id, making the editor load defaults and clobber the
+  // saved config on save (the #5 bug).
+  // staleTime:0 so each open refetches the saved config. The global default is
+  // staleTime:Infinity, and saving only invalidates the LIST prefix
+  // (["/api/campaigns"] in handleRefresh), which — because this is a
+  // single-string detail key — does NOT prefix-match. Without this, reopening
+  // the editor after a save shows the pre-save cache (the change looks reverted
+  // even though it persisted). See docs/solutions/.../getqueryfn-querykey-footgun.
+  const { data: fullCampaign } = useQuery<Campaign>({
+    queryKey: [`/api/campaigns/${campaign.id}`],
+    enabled: open,
+    staleTime: 0,
+  });
+
+  useEffect(() => {
+    if (open) {
+      const parsed = campaignConfigSchema.safeParse(fullCampaign?.config);
+      setConfig(parsed.success ? parsed.data : DEFAULT_CAMPAIGN_CONFIG);
+    }
+  }, [open, fullCampaign]);
+
+  // A stale 'running' loaded from the server means a prior recompute was
+  // interrupted (crash) — surface a retry affordance.
+  const staleRunning = campaign.recomputeStatus === "running" || fullCampaign?.recomputeStatus === "running";
+  const lastFailed = campaign.recomputeStatus === "failed" || fullCampaign?.recomputeStatus === "failed";
+
+  const hasVotes = campaign.reviewedPairs > 0;
+  const configValid = campaignConfigSchema.safeParse(config).success;
+
+  const saveMutation = useMutation({
+    mutationFn: (cfg: CampaignConfig) =>
+      apiRequest("PUT", `/api/campaigns/${campaign.id}/config`, { config: cfg }).then(
+        (r) => r.json() as Promise<ConfigSaveResult>,
+      ),
+    onSuccess: (result) => {
+      setConfirmOpen(false);
+      if (result.recomputeStatus === "failed") {
+        toast({ title: "Recompute failed", description: "Config saved, but evidence recompute failed. Retry from the menu.", variant: "destructive" });
+      } else if (result.recomputeStatus === "done") {
+        toast({ title: "Config saved", description: `Recomputed ${result.recomputed} pairs.` });
+      } else {
+        toast({ title: "Config saved" });
+      }
+      onOpenChange(false);
+      onUpdate();
+    },
+    onError: () => {
+      setConfirmOpen(false);
+      toast({ title: "Error", description: "Failed to save campaign config.", variant: "destructive" });
+    },
+  });
+
+  const handleSave = () => {
+    if (!configValid) {
+      toast({ title: "Invalid configuration", description: "Fix the highlighted fields before saving.", variant: "destructive" });
+      return;
+    }
+    if (hasVotes) {
+      // Changing config can re-tier every reviewed pair — confirm before recompute.
+      setConfirmOpen(true);
+    } else {
+      saveMutation.mutate(config);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Configure Campaign</DialogTitle>
+          <DialogDescription>{campaign.name}</DialogDescription>
+        </DialogHeader>
+
+        {staleRunning && (
+          <div className="flex items-start gap-2 rounded-md border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm">
+            <AlertTriangle className="w-4 h-4 mt-0.5 text-yellow-600" />
+            <span>A previous recompute appears interrupted (status: running). Saving again will re-run it.</span>
+          </div>
+        )}
+        {lastFailed && !staleRunning && (
+          <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+            <AlertTriangle className="w-4 h-4 mt-0.5 text-destructive" />
+            <span>The last recompute failed. Save again to retry.</span>
+          </div>
+        )}
+
+        <CampaignConfigEditor value={config} onChange={setConfig} />
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={handleSave}
+            disabled={saveMutation.isPending || !configValid}
+            data-testid="button-save-config"
+          >
+            {saveMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+            {lastFailed || staleRunning ? "Save & Retry Recompute" : "Save Config"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Recompute evidence status?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This campaign has {campaign.reviewedPairs} reviewed of {campaign.totalPairs} pairs.
+              Saving this config will recompute the evidence status for all {campaign.totalPairs} pairs
+              under the new scoring and consensus settings. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saveMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                saveMutation.mutate(config);
+              }}
+              disabled={saveMutation.isPending}
+              data-testid="button-confirm-recompute"
+            >
+              {saveMutation.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Recomputing…
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4 mr-2" />
+                  Save &amp; recompute
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Dialog>
+  );
+}
+
 function CampaignCard({ campaign, onUpdate }: { campaign: CampaignWithStats; onUpdate: () => void }) {
   const { toast } = useToast();
-  const progress = campaign.totalPairs > 0 
+  const [configDialogOpen, setConfigDialogOpen] = useState(false);
+  const [rosterOpen, setRosterOpen] = useState(false);
+
+  // Membership-derived roster — includes reviewers who joined but haven't voted
+  // (the analytics Reviewers tab is vote-derived and can't show them). Single-
+  // string key so getQueryFn hits the detail endpoint; only fetched when opened.
+  const { data: roster, isLoading: rosterLoading } = useQuery<
+    { userId: string; email: string; displayName: string | null; joinedAt: string }[]
+  >({
+    queryKey: [`/api/campaigns/${campaign.id}/roster`],
+    enabled: rosterOpen,
+  });
+
+  const handleCopyLink = async () => {
+    const url = `${window.location.origin}/campaigns/${campaign.id}/join`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast({ title: "Share link copied", description: url });
+    } catch {
+      toast({ title: "Couldn't copy link", description: url, variant: "destructive" });
+    }
+  };
+  const progress = campaign.totalPairs > 0
     ? Math.round((campaign.reviewedPairs / campaign.totalPairs) * 100) 
     : 0;
 
@@ -436,6 +677,27 @@ function CampaignCard({ campaign, onUpdate }: { campaign: CampaignWithStats; onU
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={() => setConfigDialogOpen(true)}
+                  data-testid={`button-configure-${campaign.id}`}
+                >
+                  <Settings className="w-4 h-4 mr-2" />
+                  Configure
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={handleCopyLink}
+                  data-testid={`button-copy-link-${campaign.id}`}
+                >
+                  <Link2 className="w-4 h-4 mr-2" />
+                  Copy share link
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setRosterOpen(true)}
+                  data-testid={`button-roster-${campaign.id}`}
+                >
+                  <Users className="w-4 h-4 mr-2" />
+                  Reviewers
+                </DropdownMenuItem>
                 {campaign.status === "draft" && (
                   <DropdownMenuItem onClick={() => updateStatusMutation.mutate("active")}>
                     <Play className="w-4 h-4 mr-2" />
@@ -518,6 +780,50 @@ function CampaignCard({ campaign, onUpdate }: { campaign: CampaignWithStats; onU
           )}
         </div>
       </CardContent>
+      <EditConfigDialog
+        campaign={campaign}
+        open={configDialogOpen}
+        onOpenChange={setConfigDialogOpen}
+        onUpdate={onUpdate}
+      />
+      <Dialog open={rosterOpen} onOpenChange={setRosterOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reviewers — {campaign.name}</DialogTitle>
+            <DialogDescription>
+              Experts who have joined this campaign via its share link.
+            </DialogDescription>
+          </DialogHeader>
+          {rosterLoading ? (
+            <div className="py-4 space-y-2">
+              <Skeleton className="h-9" />
+              <Skeleton className="h-9" />
+            </div>
+          ) : roster && roster.length > 0 ? (
+            <div className="divide-y divide-border max-h-80 overflow-y-auto">
+              {roster.map((m) => (
+                <div
+                  key={m.userId}
+                  className="flex items-center justify-between gap-3 py-2"
+                  data-testid={`roster-row-${m.userId}`}
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{m.displayName || m.email}</p>
+                    <p className="text-xs text-muted-foreground truncate">{m.email}</p>
+                  </div>
+                  <span className="text-xs text-muted-foreground shrink-0">
+                    {new Date(m.joinedAt).toLocaleDateString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="py-6 text-sm text-muted-foreground text-center">
+              No one's joined this campaign yet. Share its link to invite reviewers.
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
@@ -530,6 +836,10 @@ export default function AdminCampaigns() {
 
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
+    // Status/config/archive changes re-tier evidence and gate voting — refresh
+    // the reviewer-facing lists too so they don't show stale state (#11).
+    queryClient.invalidateQueries({ queryKey: ["/api/users/me/votes"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/users/me/stats"] });
   };
 
   const groupedCampaigns = {

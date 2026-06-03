@@ -59,6 +59,12 @@ import {
   ReferenceLine,
   ReferenceArea,
 } from "recharts";
+import type { CampaignWithStats } from "@shared/schema";
+import type { CampaignConfig, EvidenceStatus } from "@shared/campaignConfig";
+import {
+  EVIDENCE_TIER_META,
+  EVIDENCE_TIER_ORDER,
+} from "@/lib/evidenceTiers";
 
 type CampaignSummary = {
   id: string;
@@ -153,7 +159,13 @@ type VotesOverTime = {
 
 const COLORS = ["hsl(var(--primary))", "hsl(var(--muted-foreground))", "hsl(var(--destructive))", "hsl(var(--accent))", "hsl(var(--secondary))"];
 
-function CampaignCard({ campaign }: { campaign: CampaignSummary }) {
+function CampaignCard({
+  campaign,
+  onViewDetails,
+}: {
+  campaign: CampaignSummary;
+  onViewDetails?: () => void;
+}) {
   const statusColor = campaign.status === "active" ? "default" : campaign.status === "completed" ? "secondary" : "outline";
   
   return (
@@ -211,27 +223,54 @@ function CampaignCard({ campaign }: { campaign: CampaignSummary }) {
             Last activity: {campaign.daysSinceLastActivity} days ago
           </div>
         )}
+
+        {onViewDetails && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full mt-1"
+            onClick={onViewDetails}
+            data-testid={`button-view-details-${campaign.id}`}
+          >
+            <TrendingUp className="w-4 h-4 mr-2" />
+            View Details
+          </Button>
+        )}
       </CardContent>
     </Card>
   );
 }
 
-function VoteDistributionSection({ data }: { data: VoteDistribution }) {
+function VoteDistributionSection({
+  data,
+  config,
+}: {
+  data: VoteDistribution;
+  config: CampaignConfig | null | undefined;
+}) {
+  const binaryLabels =
+    config?.scoring.mode === "binary" ? config.scoring.binary.labels : null;
   const modeData = [
     { name: "Binary", value: data.binaryVotes || 0 },
     { name: "Numeric", value: data.numericVotes || 0 },
   ];
-  
+
   const binaryData = [
-    { name: "Match", value: data.matchVotes || 0 },
-    { name: "No Match", value: data.noMatchVotes || 0 },
+    { name: binaryLabels?.positive ?? "Match", value: data.matchVotes || 0 },
+    { name: binaryLabels?.negative ?? "No Match", value: data.noMatchVotes || 0 },
   ];
 
-  const scoreLabels = ["Unrelated", "Tangential", "Similar", "Strong", "Exact"];
-  const numericData = (data.numericScoreDistribution || []).map((d, i) => ({
-    ...d,
-    label: `${d.score} (${scoreLabels[i] || ''})`,
-  }));
+  // Numeric scale labels come from the campaign config (config.scoring.numeric.labels,
+  // keyed by score value). Fall back gracefully to the bare score when unlabeled.
+  const numericLabels =
+    config?.scoring.mode === "numeric" ? config.scoring.numeric.labels : undefined;
+  const numericData = (data.numericScoreDistribution || []).map((d) => {
+    const lbl = numericLabels?.[String(d.score)];
+    return {
+      ...d,
+      label: lbl ? `${d.score} (${lbl})` : `${d.score}`,
+    };
+  });
 
   return (
     <div className="space-y-6">
@@ -299,11 +338,11 @@ function VoteDistributionSection({ data }: { data: VoteDistribution }) {
             <div className="flex justify-center gap-4 text-sm">
               <div className="flex items-center gap-2">
                 <CheckCircle className="w-4 h-4 text-primary" />
-                Match: {(data.matchVotes || 0).toLocaleString()}
+                {binaryLabels?.positive ?? "Match"}: {(data.matchVotes || 0).toLocaleString()}
               </div>
               <div className="flex items-center gap-2">
                 <XCircle className="w-4 h-4 text-destructive" />
-                No Match: {(data.noMatchVotes || 0).toLocaleString()}
+                {binaryLabels?.negative ?? "No Match"}: {(data.noMatchVotes || 0).toLocaleString()}
               </div>
             </div>
           </CardContent>
@@ -355,6 +394,98 @@ function VoteDistributionSection({ data }: { data: VoteDistribution }) {
         </Card>
       )}
     </div>
+  );
+}
+
+/**
+ * Evidence-tier distribution across a campaign's pairs. ALWAYS renders all five
+ * tiers (showing 0 for empty ones) so "no disputed pairs yet" is visually
+ * distinguishable from "tiers not tracked". Each segment is labeled with both a
+ * color (from EVIDENCE_TIER_META) and the tier name; tiers with 0 pairs are
+ * muted but still present in the legend.
+ */
+function EvidenceTierSection({
+  tiers,
+}: {
+  tiers: Record<EvidenceStatus, number> | undefined;
+}) {
+  const total = EVIDENCE_TIER_ORDER.reduce(
+    (sum, t) => sum + (tiers?.[t] ?? 0),
+    0,
+  );
+
+  // One row, one stacked Bar per tier — keeps all five tiers in the legend.
+  const chartRow: Record<string, number | string> = { name: "Pairs" };
+  EVIDENCE_TIER_ORDER.forEach((t) => {
+    chartRow[t] = tiers?.[t] ?? 0;
+  });
+
+  return (
+    <Card className="border-card-border">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium">
+          Evidence Tier Distribution
+        </CardTitle>
+        <div className="text-xs text-muted-foreground">
+          {tiers
+            ? `${total} pair${total === 1 ? "" : "s"} across all evidence tiers`
+            : "Evidence tiers not available for this campaign"}
+        </div>
+      </CardHeader>
+      <CardContent>
+        <ResponsiveContainer width="100%" height={120}>
+          <BarChart data={[chartRow]} layout="vertical" stackOffset="expand">
+            <CartesianGrid strokeDasharray="3 3" className="opacity-50" />
+            {/* stackOffset="expand" normalizes the stack to fractions summing to
+                1, so the axis domain must be [0,1] — a [0,total] domain shrinks
+                the full-width bar to total⁻¹ of the card. */}
+            <XAxis type="number" hide domain={[0, 1]} />
+            <YAxis type="category" dataKey="name" hide />
+            <Tooltip
+              formatter={(value: number, name: string) => [
+                value,
+                EVIDENCE_TIER_META[name as EvidenceStatus]?.label ?? name,
+              ]}
+            />
+            {EVIDENCE_TIER_ORDER.map((t) => (
+              <Bar
+                key={t}
+                dataKey={t}
+                name={EVIDENCE_TIER_META[t].label}
+                stackId="tiers"
+                fill={EVIDENCE_TIER_META[t].barColor}
+              />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+        {/* Always-present legend: all five tiers, muted when 0. */}
+        <div className="flex flex-wrap justify-center gap-4 text-sm mt-2">
+          {EVIDENCE_TIER_ORDER.map((t) => {
+            const count = tiers?.[t] ?? 0;
+            const meta = EVIDENCE_TIER_META[t];
+            const Icon = meta.icon;
+            return (
+              <div
+                key={t}
+                className={`flex items-center gap-1.5 ${
+                  count === 0 ? "opacity-50" : ""
+                }`}
+                data-testid={`legend-tier-${t}`}
+              >
+                <span
+                  className="w-3 h-3 rounded"
+                  style={{ backgroundColor: meta.barColor }}
+                />
+                <Icon className="w-3.5 h-3.5" />
+                <span>
+                  {meta.label}: {count}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -529,7 +660,7 @@ function DisagreementSection({ data }: { data: DisagreementData }) {
       <Card className="border-card-border">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium">
-            High Disagreement Pairs ({data.pairs.length} pairs with 40-60% agreement)
+            Disputed Pairs ({data.pairs.length} pairs flagged as disputed)
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -697,32 +828,46 @@ function SkipAnalysisSection({ data }: { data: SkipAnalysis }) {
 
 export default function AnalyticsDashboard() {
   const [selectedCampaign, setSelectedCampaign] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState("overview");
   
   const { data: campaigns, isLoading: campaignsLoading } = useQuery<CampaignSummary[]>({
     queryKey: ["/api/analytics/campaigns"],
   });
-  
+
+  // Full campaign records carry the per-campaign config (scoring labels) and the
+  // evidence-tier breakdown — neither is on the analytics summary endpoint.
+  const { data: fullCampaigns } = useQuery<CampaignWithStats[]>({
+    queryKey: ["/api/campaigns"],
+  });
+  const selectedFull = fullCampaigns?.find((c) => c.id === selectedCampaign);
+  const selectedConfig = selectedFull?.config ?? null;
+  const selectedEvidenceTiers = selectedFull?.evidenceTiers;
+
   const { data: votesOverTime } = useQuery<VotesOverTime>({
     queryKey: ["/api/analytics/votes-over-time"],
   });
   
+  // Single-string keys hit the per-campaign DETAIL endpoints. These previously
+  // used ["/api/analytics/campaigns", id, "<section>"] with no queryFn, so the
+  // default getQueryFn fetched queryKey[0] (/api/analytics/campaigns, the list)
+  // and these sections rendered blank — the root cause of finding #12.
   const { data: voteDistribution, isLoading: votesLoading } = useQuery<VoteDistribution>({
-    queryKey: ["/api/analytics/campaigns", selectedCampaign, "votes"],
+    queryKey: [`/api/analytics/campaigns/${selectedCampaign}/votes`],
     enabled: !!selectedCampaign,
   });
-  
+
   const { data: reviewerStats, isLoading: reviewersLoading } = useQuery<ReviewerStat[]>({
-    queryKey: ["/api/analytics/campaigns", selectedCampaign, "reviewers"],
+    queryKey: [`/api/analytics/campaigns/${selectedCampaign}/reviewers`],
     enabled: !!selectedCampaign,
   });
-  
+
   const { data: disagreements, isLoading: disagreementsLoading } = useQuery<DisagreementData>({
-    queryKey: ["/api/analytics/campaigns", selectedCampaign, "disagreements"],
+    queryKey: [`/api/analytics/campaigns/${selectedCampaign}/disagreements`],
     enabled: !!selectedCampaign,
   });
-  
+
   const { data: skipAnalysis, isLoading: skipsLoading } = useQuery<SkipAnalysis>({
-    queryKey: ["/api/analytics/campaigns", selectedCampaign, "skips"],
+    queryKey: [`/api/analytics/campaigns/${selectedCampaign}/skips`],
     enabled: !!selectedCampaign,
   });
 
@@ -741,13 +886,13 @@ export default function AnalyticsDashboard() {
           </div>
         </div>
         
-        <Tabs defaultValue="overview" className="space-y-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList>
             <TabsTrigger value="overview" data-testid="tab-overview">
               <BarChart3 className="w-4 h-4 mr-2" />
               Overview
             </TabsTrigger>
-            <TabsTrigger value="campaign" data-testid="tab-campaign" disabled={!selectedCampaign}>
+            <TabsTrigger value="campaign" data-testid="tab-campaign">
               <TrendingUp className="w-4 h-4 mr-2" />
               Campaign Details
             </TabsTrigger>
@@ -794,14 +939,14 @@ export default function AnalyticsDashboard() {
               ) : campaigns && campaigns.length > 0 ? (
                 <div className="grid md:grid-cols-2 gap-4">
                   {campaigns.map((campaign) => (
-                    <div
+                    <CampaignCard
                       key={campaign.id}
-                      onClick={() => setSelectedCampaign(campaign.id)}
-                      className="cursor-pointer"
-                      data-testid={`card-campaign-${campaign.id}`}
-                    >
-                      <CampaignCard campaign={campaign} />
-                    </div>
+                      campaign={campaign}
+                      onViewDetails={() => {
+                        setSelectedCampaign(campaign.id);
+                        setActiveTab("campaign");
+                      }}
+                    />
                   ))}
                 </div>
               ) : (
@@ -813,26 +958,6 @@ export default function AnalyticsDashboard() {
               )}
             </div>
             
-            {selectedCampaign && (
-              <div className="p-4 bg-muted/50 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">
-                    Selected: <strong>{campaigns?.find(c => c.id === selectedCampaign)?.name}</strong>
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const tab = document.querySelector('[data-testid="tab-campaign"]');
-                      if (tab) (tab as HTMLElement).click();
-                    }}
-                    data-testid="button-view-details"
-                  >
-                    View Details
-                  </Button>
-                </div>
-              </div>
-            )}
           </TabsContent>
           
           <TabsContent value="campaign" className="space-y-6">
@@ -850,7 +975,15 @@ export default function AnalyticsDashboard() {
                 </SelectContent>
               </Select>
             </div>
-            
+
+            {!selectedCampaign && (
+              <Card className="border-card-border">
+                <CardContent className="py-12 text-center text-muted-foreground">
+                  Select a campaign above to view its detailed analytics.
+                </CardContent>
+              </Card>
+            )}
+
             {selectedCampaign && (
               <Tabs defaultValue="votes" className="space-y-4">
                 <TabsList>
@@ -872,11 +1005,15 @@ export default function AnalyticsDashboard() {
                   </TabsTrigger>
                 </TabsList>
                 
-                <TabsContent value="votes">
+                <TabsContent value="votes" className="space-y-6">
+                  <EvidenceTierSection tiers={selectedEvidenceTiers} />
                   {votesLoading ? (
                     <Skeleton className="h-96" />
                   ) : voteDistribution ? (
-                    <VoteDistributionSection data={voteDistribution} />
+                    <VoteDistributionSection
+                      data={voteDistribution}
+                      config={selectedConfig}
+                    />
                   ) : (
                     <div className="text-center py-8 text-muted-foreground">No data</div>
                   )}

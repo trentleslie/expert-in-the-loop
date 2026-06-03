@@ -22,15 +22,15 @@ Full-stack TypeScript monorepo. A single Express process serves both the API (`/
 
 ```
 client/          React 18 SPA (Vite, Wouter router, TanStack Query, shadcn/ui + Tailwind)
-server/          Express API (Passport.js Google OAuth, Drizzle ORM, PostgreSQL)
+server/          Express API (Clerk auth, Drizzle ORM, PostgreSQL)
 shared/          Shared schema: Drizzle table definitions + Zod validation (used by both sides)
 script/build.ts  Build orchestrator: Vite for client → dist/public/, esbuild for server → dist/index.cjs
 ```
 
 ### Data flow
 
-- **Auth**: Google OAuth 2.0 → Passport session stored in PostgreSQL `session` table. Domain whitelist via `allowed_domains` table. User roles: `reviewer` or `admin`.
-- **Client state**: TanStack Query (staleTime=Infinity, no auto-refetch). Auth state via React Context (`useAuth()` hook).
+- **Auth**: Clerk authentication (`@clerk/express` + `@clerk/react`). `clerkMiddleware()` populates auth state; custom `requireAuth`/`requireAdmin` guards in `server/auth.ts`. Domain restriction via Clerk Dashboard allowlist (`*@phenomehealth.org`). User roles (`reviewer`/`admin`) stored in Clerk `publicMetadata`, exposed via custom session token claim. FAPI proxy at `/api/__clerk` (production only). User find-or-create on `/api/auth/me` with email-based migration from legacy Google OAuth IDs.
+- **Client state**: TanStack Query (staleTime=Infinity, no auto-refetch). Auth state via `useAuth()` hook (thin wrapper over Clerk's `useUser`/`useAuth`/`useClerk`).
 - **Server routing**: All in `server/routes.ts`. Guards: `requireAuth`, `requireAdmin` middleware. Storage abstraction in `server/storage.ts`.
 
 ### Key schema entities (shared/schema.ts)
@@ -95,7 +95,7 @@ aws lightsail get-instance-metric-data --instance-name expert-in-the-loop-upgrad
 - **Auth**: md5 (configured in `/etc/postgresql/16/main/pg_hba.conf`)
 - **Backup**: `pg_dump -U expertuser -h localhost -Fc expertloop > backup.dump`
 - **Restore**: `pg_restore -U expertuser -d expertloop -h localhost --no-owner --no-privileges backup.dump`
-- **Schema changes**: `npm run db:push` must be run manually via interactive SSH on each database when schema changes land. Run on `expertloop_dev` when pushing schema changes to `dev`, and on `expertloop` when merging to `main`. The `session` table must also be created manually on new databases (see Known Issues).
+- **Schema changes**: `npm run db:push` must be run manually via interactive SSH on each database when schema changes land. Run on `expertloop_dev` when pushing to `dev`, and on `expertloop` when merging to `main`.
 
 ### Manual Deploy workflow (alternative)
 
@@ -119,7 +119,7 @@ sudo systemctl restart expert-in-the-loop
 | `main` | `.github/workflows/deploy.yml` | `~/expert-in-the-loop/` | 5000 |
 | `dev` | `.github/workflows/deploy-dev.yml` | `~/expert-in-the-loop-dev/` | 5001 |
 
-Both workflows SSH into Lightsail, pull the branch, run `npm ci && npm run build`, restart the systemd service, and health-check.
+Both workflows SSH into Lightsail, pull the branch, run `npm ci && npm run build`, restart the systemd service, and health-check. Both also source `VITE_` env vars from `.env` before build (required for the Clerk publishable key embedded in the client bundle).
 
 **Actions URL**: https://github.com/trentleslie/expert-in-the-loop/actions
 
@@ -194,31 +194,24 @@ claude login  # Opens browser for OAuth (may require SSH with X forwarding or se
 
 ### Environment
 
+Dev `.env` on Lightsail (`/home/ubuntu/expert-in-the-loop-dev/.env`):
+`DATABASE_URL`, `NODE_ENV`, `PORT`, `APP_URL`, `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `VITE_CLERK_PUBLISHABLE_KEY`, `ALLOWED_EMAIL_DOMAINS`
+
 Production `.env` on Lightsail (`/home/ubuntu/expert-in-the-loop/.env`):
 `DATABASE_URL`, `NODE_ENV`, `PORT`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, `APP_URL`
+(Production still uses Google OAuth — will be updated when Clerk is promoted to production.)
 
-Dev `.env` on Lightsail (`/home/ubuntu/expert-in-the-loop-dev/.env`):
-Same keys as production plus `SESSION_COOKIE_NAME=connect.sid.dev`. Key differences: `DATABASE_URL` → `expertloop_dev`, `PORT` → `5001`, `APP_URL` → `https://dev.expertintheloop.io`, separate `SESSION_SECRET`.
+**Note**: Express has `trust proxy` enabled for nginx `X-Forwarded-Proto` headers. The systemd `EnvironmentFile` does not handle special characters like `!` in values — use only alphanumeric passwords.
 
-**Note**: `APP_URL` is used to construct the OAuth callback URL. Express has `trust proxy` enabled for nginx `X-Forwarded-Proto` headers. The systemd `EnvironmentFile` does not handle special characters like `!` in values — use only alphanumeric passwords. `SESSION_COOKIE_NAME` prevents cookie collision between prod and dev instances on sibling subdomains.
+### Authentication (Clerk)
 
-### OAuth
+Auth is managed by Clerk (`@clerk/express` + `@clerk/react`). Key configuration:
 
-Google Cloud Console must have both redirect URIs registered:
-- `https://expertintheloop.io/api/auth/google/callback` (production)
-- `https://dev.expertintheloop.io/api/auth/google/callback` (dev)
-
-The `APP_URL` env var controls callback URL generation in `server/auth.ts`.
-
-### Known Issues
-
-- **`connect-pg-simple` session table auto-creation fails in production builds**: The `createTableIfMissing: true` option can't find `table.sql` when the server is bundled by esbuild (the file path resolves relative to `dist/` instead of `node_modules/`). The session table must be created manually on new databases:
-  ```sql
-  CREATE TABLE IF NOT EXISTS "session" (
-    "sid" varchar NOT NULL COLLATE "default",
-    "sess" json NOT NULL,
-    "expire" timestamp(6) NOT NULL,
-    CONSTRAINT "session_pkey" PRIMARY KEY ("sid")
-  );
-  CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire");
-  ```
+- **Clerk app**: "Expert in the Loop" (`app_3DNUUBLOx2pwZayuOHn2nY3DZm7`)
+- **Dashboard**: https://dashboard.clerk.com — manage users, domain allowlist, session token claims, social connections
+- **CLI**: `npx clerk` (authenticated as `trentleslie@gmail.com`) — `config pull`, `config patch`, `api`, `apps list`
+- **Domain restriction**: Clerk Dashboard → Restrictions → Allowlist (`*@phenomehealth.org`). No server-side domain check.
+- **Roles**: Stored in Clerk `publicMetadata.role` (`reviewer` or `admin`). Exposed via custom session token claim. Manage via Dashboard or `npx clerk api /users/{id} -X PATCH -d '{"public_metadata":{"role":"admin"}}'`
+- **Frontend API (custom domain)**: The production instance uses CNAME mode — `clerk.expertintheloop.io` (encoded in the `pk_live` publishable key) resolves to Clerk's FAPI. The client talks to it directly; **do not** set `VITE_CLERK_PROXY_URL` in production (proxy mode breaks attribution against a custom-domain instance). The `/api/__clerk` proxy middleware in `server/auth.ts` is dormant legacy and pending removal.
+- **Google OAuth**: Configured as a social connection in Clerk Dashboard (not in app code)
+- **User ID migration**: `/api/auth/me` handles find-or-create with email-based fallback for users with legacy Google OAuth IDs

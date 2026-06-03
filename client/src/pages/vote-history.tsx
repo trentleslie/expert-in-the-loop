@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +12,8 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -19,10 +21,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient as qc } from "@/lib/queryClient";
+import { binaryVoteLabel, numericVoteLabel } from "@/lib/scoringLabels";
+import { ScoringControls } from "@/components/ScoringControls";
+import type { CampaignConfig } from "@shared/campaignConfig";
 import {
   ArrowLeft,
   ThumbsUp,
@@ -48,48 +51,60 @@ function formatDate(date: Date | string) {
 
 function VoteCard({
   vote,
+  scoring,
+  campaignName,
   onEdit,
 }: {
   vote: VoteWithPair;
+  scoring?: CampaignConfig["scoring"];
+  campaignName?: string;
   onEdit: (vote: VoteWithPair) => void;
 }) {
   const isLoinc = vote.pair.targetDataset?.toUpperCase() === "LOINC";
 
   return (
-    <Card className="border-card-border" data-testid={`card-vote-${vote.id}`}>
+    <Card
+      className={`border-card-border ${vote.isActive ? "" : "opacity-60"}`}
+      data-testid={`card-vote-${vote.id}`}
+    >
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
               {vote.scoringMode === "binary" ? (
                 vote.scoreBinary === "match" ? (
                   <Badge className="bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20">
                     <ThumbsUp className="w-3 h-3 mr-1" />
-                    Confirmed
+                    {binaryVoteLabel(scoring, "match")}
                   </Badge>
                 ) : vote.scoreBinary === "unsure" ? (
                   <Badge className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20">
                     <HelpCircle className="w-3 h-3 mr-1" />
-                    Unsure
+                    {binaryVoteLabel(scoring, "unsure")}
                   </Badge>
                 ) : (
                   <Badge className="bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20">
                     <ThumbsDown className="w-3 h-3 mr-1" />
-                    Rejected
+                    {binaryVoteLabel(scoring, "no_match")}
                   </Badge>
                 )
               ) : (
                 <Badge variant="secondary">
-                  Score: {vote.scoreNumeric}/5
+                  Score: {vote.scoreNumeric != null ? numericVoteLabel(scoring, vote.scoreNumeric) : "—"}
+                </Badge>
+              )}
+              {campaignName && (
+                <Badge variant="outline" className="text-xs font-normal">
+                  {campaignName}
                 </Badge>
               )}
               <span className="text-xs text-muted-foreground">
                 {formatDate(vote.createdAt)}
               </span>
-              {vote.updatedAt && new Date(vote.updatedAt).getTime() > new Date(vote.createdAt).getTime() + 1000 && (
-                <span className="text-xs text-muted-foreground italic">
-                  (edited)
-                </span>
+              {!vote.isActive && (
+                <Badge variant="outline" className="text-xs text-muted-foreground">
+                  Superseded
+                </Badge>
               )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
@@ -133,14 +148,16 @@ function VoteCard({
               </p>
             )}
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onEdit(vote)}
-            data-testid={`button-edit-vote-${vote.id}`}
-          >
-            <Edit className="w-4 h-4" />
-          </Button>
+          {vote.isActive && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onEdit(vote)}
+              data-testid={`button-edit-vote-${vote.id}`}
+            >
+              <Edit className="w-4 h-4" />
+            </Button>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -149,10 +166,12 @@ function VoteCard({
 
 function EditVoteDialog({
   vote,
+  scoring,
   open,
   onClose,
 }: {
   vote: VoteWithPair | null;
+  scoring?: CampaignConfig["scoring"];
   open: boolean;
   onClose: () => void;
 }) {
@@ -192,16 +211,20 @@ function EditVoteDialog({
     onSuccess: () => {
       toast({
         title: "Vote updated",
-        description: "Your vote has been successfully updated.",
+        description: "Your previous vote was superseded with this correction.",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/users/me/votes"] });
       queryClient.invalidateQueries({ queryKey: ["/api/users/me/stats"] });
+      // Editing a vote re-tiers the pair — refresh the results browser + home
+      // progress (they prefix-match ["/api/campaigns"]) so they don't go stale (#11).
+      queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
       onClose();
     },
-    onError: () => {
+    onError: (error: Error) => {
+      // Surface the server message (e.g. 403 archived campaign, 400 mode mismatch).
       toast({
         title: "Error",
-        description: "Failed to update vote. Please try again.",
+        description: error?.message || "Failed to update vote. Please try again.",
         variant: "destructive",
       });
     },
@@ -229,22 +252,7 @@ function EditVoteDialog({
             </p>
           </div>
 
-          <div className="space-y-2">
-            <Label>Scoring Mode</Label>
-            <Select
-              value={scoringMode}
-              onValueChange={(v) => setScoringMode(v as "binary" | "numeric")}
-            >
-              <SelectTrigger data-testid="select-scoring-mode">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="binary">Binary (Yes/No)</SelectItem>
-                <SelectItem value="numeric">Numeric (1-5)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
+          {/* Scoring mode is fixed by the campaign — edits keep the original mode. */}
           {scoringMode === "binary" ? (
             <div className="space-y-2">
               <Label>Your Vote</Label>
@@ -256,7 +264,7 @@ function EditVoteDialog({
                   data-testid="button-edit-no-match"
                 >
                   <ThumbsDown className="w-4 h-4 mr-2" />
-                  Reject
+                  {binaryVoteLabel(scoring, "no_match")}
                 </Button>
                 <Button
                   variant={scoreBinary === "unsure" ? "default" : "outline"}
@@ -265,7 +273,7 @@ function EditVoteDialog({
                   data-testid="button-edit-unsure"
                 >
                   <HelpCircle className="w-4 h-4 mr-2" />
-                  Unsure
+                  {binaryVoteLabel(scoring, "unsure")}
                 </Button>
                 <Button
                   variant={scoreBinary === "match" ? "default" : "outline"}
@@ -274,29 +282,38 @@ function EditVoteDialog({
                   data-testid="button-edit-yes-match"
                 >
                   <ThumbsUp className="w-4 h-4 mr-2" />
-                  Confirm
+                  {binaryVoteLabel(scoring, "match")}
                 </Button>
               </div>
             </div>
           ) : (
             <div className="space-y-2">
               <Label>Your Score</Label>
-              <div className="flex gap-1">
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <Button
-                    key={n}
-                    variant={scoreNumeric === n ? "default" : "outline"}
-                    className="flex-1"
-                    onClick={() => setScoreNumeric(n)}
-                    data-testid={`button-edit-score-${n}`}
-                  >
-                    {n}
-                  </Button>
-                ))}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                1 = Unrelated, 5 = Exact match
-              </p>
+              {scoring?.mode === "numeric" ? (
+                // Config-driven: real range + per-value labels + slider for large
+                // ranges. Replaces the legacy hardcoded 1-5 / "Unrelated…Exact".
+                <ScoringControls
+                  scoring={scoring}
+                  numericValue={scoreNumeric}
+                  onNumericSelect={setScoreNumeric}
+                  onBinarySelect={() => {}}
+                />
+              ) : (
+                // Fallback only when the campaign config hasn't loaded.
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <Button
+                      key={n}
+                      variant={scoreNumeric === n ? "default" : "outline"}
+                      className="flex-1"
+                      onClick={() => setScoreNumeric(n)}
+                      data-testid={`button-edit-score-${n}`}
+                    >
+                      {n}
+                    </Button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -331,10 +348,53 @@ function EditVoteDialog({
 export default function VoteHistoryPage() {
   const [, setLocation] = useLocation();
   const [editingVote, setEditingVote] = useState<VoteWithPair | null>(null);
+  const [campaignFilter, setCampaignFilter] = useState<string>("all");
 
   const { data: votes, isLoading, isError } = useQuery<VoteWithPair[]>({
     queryKey: ["/api/users/me/votes"],
   });
+
+  // Vote history spans multiple campaigns; fetch their configs so each vote is
+  // labelled with its own campaign's scoring labels (not hardcoded tier words),
+  // and its name (for the per-card indicator + the campaign filter).
+  const { data: campaigns } = useQuery<{ id: string; name: string; config: CampaignConfig | null }[]>({
+    queryKey: ["/api/campaigns"],
+  });
+  const scoringByCampaign = useMemo(() => {
+    const map = new Map<string, CampaignConfig["scoring"]>();
+    campaigns?.forEach((c) => {
+      if (c.config) map.set(c.id, c.config.scoring);
+    });
+    return map;
+  }, [campaigns]);
+  const nameByCampaign = useMemo(() => {
+    const map = new Map<string, string>();
+    campaigns?.forEach((c) => map.set(c.id, c.name));
+    return map;
+  }, [campaigns]);
+
+  // Only offer campaigns the user has actually voted in, in first-seen order.
+  const votedCampaigns = useMemo(() => {
+    const seen = new Map<string, string>();
+    votes?.forEach((v) => {
+      const id = v.pair.campaignId;
+      if (!seen.has(id)) seen.set(id, nameByCampaign.get(id) ?? id);
+    });
+    return Array.from(seen, ([id, name]) => ({ id, name }));
+  }, [votes, nameByCampaign]);
+
+  // Reset a stale filter (e.g. all votes in the selected campaign were superseded
+  // away on another device) so the list never silently shows empty.
+  useEffect(() => {
+    if (campaignFilter !== "all" && !votedCampaigns.some((c) => c.id === campaignFilter)) {
+      setCampaignFilter("all");
+    }
+  }, [campaignFilter, votedCampaigns]);
+
+  const visibleVotes = useMemo(
+    () => (campaignFilter === "all" ? votes : votes?.filter((v) => v.pair.campaignId === campaignFilter)),
+    [votes, campaignFilter],
+  );
 
   if (isLoading) {
     return (
@@ -390,9 +450,25 @@ export default function VoteHistoryPage() {
               Vote History
             </h1>
             <p className="text-sm text-muted-foreground">
-              {votes?.length || 0} votes total
+              {visibleVotes?.length || 0} vote{(visibleVotes?.length || 0) === 1 ? "" : "s"}
+              {campaignFilter === "all" ? " total" : " in this campaign"}
             </p>
           </div>
+          {votedCampaigns.length > 1 && (
+            <Select value={campaignFilter} onValueChange={setCampaignFilter}>
+              <SelectTrigger className="w-56 ml-auto" data-testid="select-campaign-filter">
+                <SelectValue placeholder="All campaigns" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All campaigns</SelectItem>
+                {votedCampaigns.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
 
         {votes && votes.length === 0 ? (
@@ -408,10 +484,12 @@ export default function VoteHistoryPage() {
           </Card>
         ) : (
           <div className="space-y-4">
-            {votes?.map((vote) => (
+            {visibleVotes?.map((vote) => (
               <VoteCard
                 key={vote.id}
                 vote={vote}
+                scoring={scoringByCampaign.get(vote.pair.campaignId)}
+                campaignName={nameByCampaign.get(vote.pair.campaignId)}
                 onEdit={setEditingVote}
               />
             ))}
@@ -421,6 +499,7 @@ export default function VoteHistoryPage() {
 
       <EditVoteDialog
         vote={editingVote}
+        scoring={editingVote ? scoringByCampaign.get(editingVote.pair.campaignId) : undefined}
         open={!!editingVote}
         onClose={() => setEditingVote(null)}
       />

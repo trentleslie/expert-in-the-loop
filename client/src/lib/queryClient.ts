@@ -29,6 +29,18 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
+    // FOOTGUN: this default query function fetches `queryKey[0]` as the URL and
+    // IGNORES every later segment. A multi-segment key like
+    // ["/api/campaigns", id] therefore hits the LIST endpoint, not the detail
+    // one — silently returning the wrong data (this caused the config-editor
+    // clobber bug). When you need path params, use a single-string key
+    // (`/api/campaigns/${id}`) or supply an explicit `queryFn`.
+    if (import.meta.env.DEV && queryKey.length > 1) {
+      console.warn(
+        `[queryClient] Query key ${JSON.stringify(queryKey)} has >1 segment but no explicit queryFn; ` +
+          `only queryKey[0] ("${String(queryKey[0])}") is fetched. Use a single-string key or an explicit queryFn.`,
+      );
+    }
     const url = queryKey[0] as string;
     const res = await fetch(url, {
       credentials: "include",

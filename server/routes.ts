@@ -1,12 +1,22 @@
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
-import passport from "passport";
+import { getAuth, clerkClient } from "@clerk/express";
 import multer from "multer";
 import { parse } from "csv-parse/sync";
-import { stringify } from "csv-stringify/sync";
+import {
+  EXPORT_FORMATS,
+  isExportFormat,
+  buildExportRows,
+  serializeExport,
+  exportContentType,
+  exportFilename,
+} from "./exportSerializer";
 import { storage } from "./storage";
-import { setupAuth, requireAuth, requireAdmin } from "./auth";
+import { requireAuth, requireAdmin } from "./auth";
+import { resolveMigrationEmail } from "./authMigration";
+import { isCampaignJoinable } from "./campaignMembership";
 import { insertCampaignSchema, insertVoteSchema, type InsertPair } from "@shared/schema";
+import { RESOLUTION_LAYER_VALUES, campaignConfigSchema } from "@shared/campaignConfig";
 import { z } from "zod";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -15,62 +25,73 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Setup authentication
-  setupAuth(app);
-
   // ==================== AUTH ROUTES ====================
 
-  // Google OAuth - initiate login
-  app.get("/api/auth/google", (req, res, next) => {
-    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-      return res.redirect("/login?error=oauth_not_configured");
-    }
-    passport.authenticate("google", { scope: ["profile", "email"] })(req, res, next);
-  });
+  // Get current user (find-or-create on first call)
+  // Uses requireAuth to enforce domain whitelist before creating local records
+  app.get("/api/auth/me", requireAuth, async (req, res) => {
+    const auth = getAuth(req);
+    const userId = auth.userId!; // guaranteed by requireAuth
 
-  // Google OAuth callback
-  app.get(
-    "/api/auth/google/callback",
-    (req, res, next) => {
-      passport.authenticate("google", (err: Error | null, user: Express.User | false, info: { message?: string }) => {
-        if (err) {
-          console.error("Google OAuth error:", err);
-          return res.redirect("/login?error=auth_failed");
+    try {
+      // Find by Clerk userId first, then fall back to email lookup
+      // (handles migration from Google OAuth IDs to Clerk IDs)
+      let user = await storage.getUser(userId);
+      if (!user) {
+        const clerkUser = await clerkClient.users.getUser(userId);
+        const resolved = resolveMigrationEmail(clerkUser);
+        if (!resolved.ok) {
+          // An unverified or missing primary email must not match-and-migrate an
+          // existing local row (account takeover) nor create one under a synthetic
+          // address. Treat as unauthenticated. (Cutover guard — Unit 1b.)
+          return res.status(403).json({ message: "A verified email address is required." });
         }
-        if (!user) {
-          const errorType = info?.message === "domain_not_allowed" ? "domain_not_allowed" : "auth_failed";
-          return res.redirect(`/login?error=${errorType}`);
-        }
-        req.logIn(user, (loginErr) => {
-          if (loginErr) {
-            console.error("Login error:", loginErr);
-            return res.redirect("/login?error=auth_failed");
-          }
-          return res.redirect("/");
-        });
-      })(req, res, next);
-    }
-  );
+        const email = resolved.email;
 
-  // Logout
-  app.post("/api/auth/logout", (req, res) => {
-    req.logout((err) => {
-      if (err) {
-        return res.status(500).json({ message: "Logout failed" });
+        // Check if user exists with this email but a different (old) ID
+        const existingByEmail = await storage.getUserByEmail(email);
+        if (existingByEmail) {
+          // Migrate: update the old ID to the new Clerk ID
+          await storage.updateUserId(existingByEmail.id, userId);
+          user = await storage.getUser(userId);
+        } else {
+          user = await storage.createUser({
+            id: userId,
+            email,
+            displayName:
+              clerkUser.fullName ||
+              clerkUser.firstName ||
+              email.split("@")[0],
+            role: ((clerkUser.publicMetadata as Record<string, unknown>)?.role as "reviewer" | "admin") || "reviewer",
+          });
+        }
       }
-      req.session.destroy((destroyErr) => {
-        res.clearCookie("connect.sid");
-        res.json({ success: true });
-      });
-    });
-  });
 
-  // Get current user
-  app.get("/api/auth/me", (req, res) => {
-    if (req.isAuthenticated() && req.user) {
-      return res.json({ user: req.user });
+      // Reconcile the Clerk session-token `role` claim with the authoritative DB
+      // role on EVERY login. requireAdmin reads `sessionClaims.role` (not the DB),
+      // so this is what actually gates admin. Comparing the claim we already have
+      // (no extra Clerk fetch) makes the cutover role-grant **self-healing**: if a
+      // prior sync failed, the next login retries because the token still lacks
+      // the claim. Isolated in its own try/catch so a transient Clerk API error
+      // can't 500 the auth check or block the user from getting their account
+      // (the worst case is they retry on their next login). Not bound to the
+      // once-per-user migrate branch, so a single failed write is never permanent.
+      const claimRole = (auth.sessionClaims as Record<string, unknown> | undefined)?.role;
+      if (user && user.role && claimRole !== user.role) {
+        try {
+          await clerkClient.users.updateUserMetadata(userId, {
+            publicMetadata: { role: user.role },
+          });
+        } catch (syncError) {
+          console.error("[auth] Failed to sync role to Clerk (will retry next login):", syncError);
+        }
+      }
+
+      return res.json({ user });
+    } catch (error) {
+      console.error("Error fetching user:", error);
+      return res.status(500).json({ message: "Failed to fetch user" });
     }
-    return res.status(401).json({ message: "Not authenticated" });
   });
 
   // ==================== CAMPAIGN ROUTES ====================
@@ -116,7 +137,7 @@ export async function registerRoutes(
     try {
       const validatedData = insertCampaignSchema.parse({
         ...req.body,
-        createdBy: req.user!.id,
+        createdBy: getAuth(req).userId!,
         status: "draft",
       });
       const campaign = await storage.createCampaign(validatedData);
@@ -145,6 +166,41 @@ export async function registerRoutes(
     }
   });
 
+  // Update campaign config (admin only). Validates against the shared contract,
+  // persists, and — if the campaign already has votes — bulk-recomputes evidence
+  // status under the new config (consensus thresholds / scoring mode may change
+  // every pair's tier). Returns the recompute outcome so the UI can show
+  // running -> done/failed.
+  app.put("/api/campaigns/:id/config", requireAdmin, async (req, res) => {
+    try {
+      const campaign = await storage.getCampaign(req.params.id);
+      if (!campaign) {
+        return res.status(404).json({ message: "Campaign not found" });
+      }
+
+      const parsed = campaignConfigSchema.safeParse(req.body?.config);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid campaign config", errors: parsed.error.errors });
+      }
+
+      await storage.updateCampaignConfig(req.params.id, parsed.data);
+
+      // Only campaigns with existing votes need a recompute — a config edit on a
+      // not-yet-reviewed campaign just takes effect on future votes.
+      const progress = await storage.getCampaignProgress(req.params.id);
+      if (progress.reviewed > 0) {
+        const result = await storage.recomputeCampaignEvidenceStatus(req.params.id);
+        return res.json({ success: true, recomputed: result.recomputed, recomputeStatus: result.status });
+      }
+
+      return res.json({ success: true, recomputed: 0, recomputeStatus: "idle" });
+    } catch (error) {
+      console.error("Error updating campaign config:", error);
+      // recomputeCampaignEvidenceStatus already persisted recomputeStatus='failed'.
+      res.status(500).json({ message: "Failed to update campaign config", recomputeStatus: "failed" });
+    }
+  });
+
   // Upload pairs to campaign (admin only)
   // Accepts two formats:
   //   1. multipart/form-data with a "file" field (CSV or JSON file upload)
@@ -168,8 +224,8 @@ export async function registerRoutes(
           return res.status(400).json({ message: "Request body must contain a non-empty 'pairs' array" });
         }
 
-        // Validate each pair has the required fields
-        const validPairTypes = ["questionnaire_match", "loinc_mapping"];
+        // Validate each pair has the required fields. pairType is now free-text
+        // (defaults to the campaign type) — no fixed allowlist.
         const invalidPairs: number[] = [];
 
         pairsData = rawPairs.map((p: any, idx: number) => {
@@ -181,13 +237,14 @@ export async function registerRoutes(
           const targetDataset = p.target_dataset || p.targetDataset;
           const targetId = p.target_id || p.targetId;
 
-          if (!sourceText || !sourceId || !targetText || !targetId || !validPairTypes.includes(pairType)) {
+          if (!sourceText || !sourceId || !targetText || !targetId) {
             invalidPairs.push(idx);
           }
 
           return {
             campaignId,
-            pairType: pairType as "questionnaire_match" | "loinc_mapping",
+            pairType,
+            resolutionLayer: p.resolution_layer || p.resolutionLayer || "unspecified",
             sourceText: sourceText || "",
             sourceDataset: sourceDataset || "Unknown",
             sourceId: sourceId || "",
@@ -206,7 +263,7 @@ export async function registerRoutes(
 
         if (invalidPairs.length > 0) {
           return res.status(400).json({
-            message: `${invalidPairs.length} pair(s) are missing required fields (sourceText, sourceId, targetText, targetId) or have an invalid pairType. Valid types: ${validPairTypes.join(", ")}`,
+            message: `${invalidPairs.length} pair(s) are missing required fields (sourceText, sourceId, targetText, targetId).`,
             invalidIndices: invalidPairs,
           });
         }
@@ -226,6 +283,7 @@ export async function registerRoutes(
           pairsData = rawPairs.map((p: any) => ({
             campaignId,
             pairType: p.pair_type || p.pairType || campaign.campaignType,
+            resolutionLayer: p.resolution_layer || p.resolutionLayer || "unspecified",
             sourceText: p.source_text || p.sourceText,
             sourceDataset: p.source_dataset || p.sourceDataset,
             sourceId: p.source_id || p.sourceId,
@@ -246,34 +304,58 @@ export async function registerRoutes(
             trim: true,
           });
 
-          pairsData = records.map((row: any) => {
-            // Build metadata from extra columns
-            const sourceMetadata: Record<string, unknown> = {};
-            const targetMetadata: Record<string, unknown> = {};
+          // Standard field columns are mapped explicitly; ALL other columns are
+          // preserved verbatim in sourceMetadata (no LOINC-specific fallbacks or
+          // hardcoded metadata keys). For precise source/target metadata splits,
+          // use the column-mapping wizard (JSON path above). Stored as raw
+          // strings — downstream renders them text-only (never as HTML).
+          const STANDARD_COLS = new Set([
+            "source_text", "source_dataset", "source_id", "source_metadata",
+            "target_text", "target_dataset", "target_id", "target_metadata",
+            "pair_type", "resolution_layer", "llm_confidence", "confidence_score",
+            "llm_model", "llm_reasoning",
+          ]);
 
-            if (row.category) sourceMetadata.category = row.category;
-            if (row.units) sourceMetadata.units = row.units;
-            if (row.data_type) sourceMetadata.data_type = row.data_type;
-            if (row.query_source) sourceMetadata.query_source = row.query_source;
-            if (row.num_queries) sourceMetadata.num_queries = row.num_queries;
-            if (row.top_5_loinc) targetMetadata.top_5_loinc = row.top_5_loinc;
+          // A malformed JSON cell in a metadata column must yield a descriptive
+          // 400 (which row + column), not throw synchronously inside .map() and
+          // surface as an opaque 500. Collect failures and reject as a batch —
+          // mirrors the resolution_layer validation just below.
+          // `row` is 1-based (row 1 = first data row after the header) so the
+          // error maps directly to the user's file without mental arithmetic.
+          const metadataErrors: { row: number; column: string }[] = [];
+          const parseMetadataCell = (raw: string, column: string, index: number): any => {
+            try {
+              return JSON.parse(raw);
+            } catch {
+              metadataErrors.push({ row: index + 1, column });
+              return null;
+            }
+          };
+
+          pairsData = records.map((row: any, index: number) => {
+            const extraMetadata: Record<string, unknown> = {};
+            for (const [key, value] of Object.entries(row)) {
+              if (!STANDARD_COLS.has(key) && value !== "" && value != null) {
+                extraMetadata[key] = value;
+              }
+            }
 
             return {
               campaignId,
               pairType: row.pair_type || campaign.campaignType,
-              // Support both standard names and Arivale/LOINC format
-              sourceText: row.source_text || row.description,
-              sourceDataset: row.source_dataset || row.cohort || "Unknown",
-              sourceId: row.source_id || row.field_name,
+              resolutionLayer: row.resolution_layer || "unspecified",
+              sourceText: row.source_text,
+              sourceDataset: row.source_dataset || "Unknown",
+              sourceId: row.source_id,
               sourceMetadata: row.source_metadata
-                ? JSON.parse(row.source_metadata)
-                : (Object.keys(sourceMetadata).length > 0 ? sourceMetadata : null),
-              targetText: row.target_text || row.loinc_name,
-              targetDataset: row.target_dataset || (row.loinc_code ? "LOINC" : "Unknown"),
-              targetId: row.target_id || row.loinc_code,
+                ? parseMetadataCell(row.source_metadata, "source_metadata", index)
+                : (Object.keys(extraMetadata).length > 0 ? extraMetadata : null),
+              targetText: row.target_text,
+              targetDataset: row.target_dataset || "Unknown",
+              targetId: row.target_id,
               targetMetadata: row.target_metadata
-                ? JSON.parse(row.target_metadata)
-                : (Object.keys(targetMetadata).length > 0 ? targetMetadata : null),
+                ? parseMetadataCell(row.target_metadata, "target_metadata", index)
+                : null,
               llmConfidence: row.llm_confidence
                 ? parseFloat(row.llm_confidence)
                 : (row.confidence_score ? parseFloat(row.confidence_score) : null),
@@ -281,29 +363,49 @@ export async function registerRoutes(
               llmReasoning: row.llm_reasoning || null,
             };
           });
+
+          if (metadataErrors.length > 0) {
+            return res.status(400).json({
+              message: "Invalid JSON in metadata column(s); each cell must contain valid JSON.",
+              errors: metadataErrors,
+            });
+          }
         }
       }
 
-      // ── Same-source pair detection ───────────────────────────────────────
-      // Helper function to extract source prefix from question ID
-      const getSourcePrefix = (id: string): string => {
-        if (id.startsWith("arivale_")) return "arivale";
-        if (id.startsWith("il10k_")) return "il10k";
-        if (id.startsWith("ukbb_")) return "ukbb";
-        return "unknown";
-      };
+      // ── Provenance validation ────────────────────────────────────────────
+      // resolutionLayer flows to downstream exports — reject unknown values
+      // rather than silently mislabeling provenance.
+      const invalidLayers = pairsData
+        .map((p, i) => ({ i, rl: p.resolutionLayer }))
+        .filter((x) => x.rl != null && !(RESOLUTION_LAYER_VALUES as readonly string[]).includes(x.rl));
+      if (invalidLayers.length > 0) {
+        return res.status(400).json({
+          message: `Invalid resolution_layer value(s). Allowed: ${RESOLUTION_LAYER_VALUES.join(", ")}.`,
+          invalidIndices: invalidLayers.map((x) => x.i),
+        });
+      }
 
-      // Filter out same-source pairs (invalid for cross-source harmonization)
-      const sameSourcePairs: string[] = [];
-      const crossSourcePairsData = pairsData.filter((p) => {
-        const sourcePrefix = getSourcePrefix(p.sourceId);
-        const targetPrefix = getSourcePrefix(p.targetId);
-        if (sourcePrefix !== "unknown" && sourcePrefix === targetPrefix) {
-          sameSourcePairs.push(`${p.sourceId} ↔ ${p.targetId}`);
-          return false;
-        }
-        return true;
-      });
+      // ── Same-source filtering (config-driven, opt-in per campaign) ─────────
+      // Only filters when the campaign enables sourcePrefixFilter, using its
+      // configured prefixes (no hardcoded arivale_/il10k_/ukbb_ list).
+      const config = await storage.getCampaignConfig(campaignId);
+      let sameSourcePairs: string[] = [];
+      let crossSourcePairsData = pairsData;
+      if (config.import.sourcePrefixFilter) {
+        const prefixes = config.import.sourcePrefixes ?? [];
+        const prefixOf = (id: string): string | null =>
+          prefixes.find((pre) => id.startsWith(pre)) ?? null;
+        crossSourcePairsData = pairsData.filter((p) => {
+          const sp = prefixOf(p.sourceId);
+          const tp = prefixOf(p.targetId);
+          if (sp !== null && sp === tp) {
+            sameSourcePairs.push(`${p.sourceId} ↔ ${p.targetId}`);
+            return false;
+          }
+          return true;
+        });
+      }
 
       // ── Duplicate detection ───────────────────────────────────────────────
       // Fetch all existing source_id + target_id combinations for this campaign
@@ -359,7 +461,16 @@ export async function registerRoutes(
   app.get("/api/campaigns/:id/next-pair", requireAuth, async (req, res) => {
     try {
       const campaignId = req.params.id;
-      const userId = req.user!.id;
+      const userId = getAuth(req).userId!;
+
+      // Archived/completed campaigns are not open for voting (clean-slate
+      // isolation). storage.getNextPairForUser also guards, but return an
+      // explicit signal rather than a silent empty queue.
+      const campaign = await storage.getCampaign(campaignId);
+      if (!campaign) return res.status(404).json({ message: "Campaign not found" });
+      if (campaign.status === "archived" || campaign.status === "completed") {
+        return res.status(403).json({ message: "Campaign is not open for voting" });
+      }
 
       const pair = await storage.getNextPairForUser(campaignId, userId);
       const progress = await storage.getCampaignProgress(campaignId);
@@ -432,33 +543,29 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Campaign not found" });
       }
 
+      // Format is an allowlisted query param; default csv. All formats export
+      // the WHOLE campaign (on-screen filters are not applied to exports) and
+      // share one serializer so field coverage can't drift across formats.
+      const format = req.query.format ?? "csv";
+      if (!isExportFormat(format)) {
+        return res
+          .status(400)
+          .json({ message: `Invalid format. Allowed: ${EXPORT_FORMATS.join(", ")}.` });
+      }
+
       const exportData = await storage.getCampaignExportData(campaignId);
+      const rows = buildExportRows(exportData);
+      const body = serializeExport(rows, format, {
+        campaignName: campaign.name,
+        exportedAt: new Date().toISOString(),
+      });
 
-      const csvData = exportData.map((item) => ({
-        pair_id: item.pair.id,
-        source_text: item.pair.sourceText,
-        source_dataset: item.pair.sourceDataset,
-        source_id: item.pair.sourceId,
-        target_text: item.pair.targetText,
-        target_dataset: item.pair.targetDataset,
-        target_id: item.pair.targetId,
-        llm_confidence: item.pair.llmConfidence,
-        llm_model: item.pair.llmModel,
-        vote_count: item.votes.length,
-        positive_votes: item.votes.filter((v) => v.scoreBinary === "match").length,
-        negative_votes: item.votes.filter((v) => v.scoreBinary === "no_match").length,
-        unsure_votes: item.votes.filter((v) => v.scoreBinary === "unsure").length,
-        positive_rate: item.positiveRate !== null ? item.positiveRate.toFixed(3) : "",
-        consensus: item.positiveRate !== null ? (item.positiveRate > 0.5 ? "match" : "no_match") : "",
-        expert_selections: item.votes.filter(v => v.expertSelectedCode).map(v => v.expertSelectedCode).join("; "),
-        reviewer_notes: item.votes.filter(v => v.reviewerNotes).map(v => v.reviewerNotes).join(" | "),
-      }));
-
-      const csv = stringify(csvData, { header: true });
-      
-      res.setHeader("Content-Type", "text/csv");
-      res.setHeader("Content-Disposition", `attachment; filename="${campaign.name.replace(/\s+/g, "_")}_export.csv"`);
-      res.send(csv);
+      res.setHeader("Content-Type", exportContentType(format));
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${exportFilename(campaign.name, format)}"`,
+      );
+      res.send(body);
     } catch (error) {
       console.error("Error exporting campaign:", error);
       res.status(500).json({ message: "Failed to export campaign" });
@@ -467,50 +574,108 @@ export async function registerRoutes(
 
   // ==================== PAIR/VOTE ROUTES ====================
 
-  // Submit vote for a pair
-  app.post("/api/pairs/:id/vote", requireAuth, async (req, res) => {
+  // Shared vote-cast handler. POST = first vote, PATCH = edit/correction; both
+  // create-or-supersede atomically (storage.castVote). No more 409-on-duplicate —
+  // a repeat vote supersedes the prior one. Reaching this with an existing vote
+  // only happens via the vote-history "edit" action (the review queue never
+  // re-serves a decided pair); supersession is therefore audit-only.
+  async function castVoteHandler(req: Request, res: Response) {
     try {
       const pairId = req.params.id;
-      const userId = req.user!.id;
+      const userId = getAuth(req).userId!; // server-authoritative — never trust the body
+
+      const pair = await storage.getPair(pairId);
+      if (!pair) return res.status(404).json({ message: "Pair not found" });
+
+      const campaign = await storage.getCampaign(pair.campaignId);
+      if (!campaign) return res.status(404).json({ message: "Campaign not found" });
+      if (campaign.status === "archived" || campaign.status === "completed") {
+        return res.status(403).json({ message: "Campaign is not open for voting" });
+      }
+
+      // Scoring mode is campaign-level — derive from config, don't trust req.body.
+      const config = await storage.getCampaignConfig(pair.campaignId);
+      const mode = config.scoring.mode;
+
+      // Reject votes whose shape mismatches the campaign's scoring mode.
+      if (mode === "binary" && (req.body.scoreBinary == null || req.body.scoreNumeric != null)) {
+        return res.status(400).json({ message: "This campaign uses binary scoring; provide scoreBinary only." });
+      }
+      if (mode === "numeric" && (req.body.scoreNumeric == null || req.body.scoreBinary != null)) {
+        return res.status(400).json({ message: "This campaign uses numeric scoring; provide scoreNumeric only." });
+      }
 
       const voteData = insertVoteSchema.parse({
         pairId,
         userId,
-        scoreBinary: req.body.scoreBinary,
-        scoreNumeric: req.body.scoreNumeric || null,
-        scoringMode: req.body.scoringMode || "binary",
-        // Expert selection and notes
-        expertSelectedCode: req.body.expertSelectedCode || null,
-        reviewerNotes: req.body.reviewerNotes || null,
+        scoreBinary: mode === "binary" ? req.body.scoreBinary : null,
+        scoreNumeric: mode === "numeric" ? req.body.scoreNumeric : null,
+        scoringMode: mode,
+        expertSelectedCode: req.body.expertSelectedCode ?? null,
+        reviewerNotes: req.body.reviewerNotes ?? null,
       });
 
-      const vote = await storage.createVote(voteData);
+      const { vote, evidenceStatus } = await storage.castVote(pairId, userId, voteData, config);
       await storage.updateUserLastActive(userId);
 
-      res.status(201).json(vote);
-    } catch (error: any) {
-      console.error("Error creating vote:", error);
-      if (error.code === "23505") {
-        return res.status(409).json({ message: "You have already voted on this pair" });
-      }
+      res.status(201).json({ ...vote, evidenceStatus });
+    } catch (error) {
+      console.error("Error casting vote:", error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid vote data", errors: error.errors });
       }
       res.status(500).json({ message: "Failed to submit vote" });
     }
-  });
+  }
+
+  // Submit vote for a pair
+  app.post("/api/pairs/:id/vote", requireAuth, castVoteHandler);
 
   // Skip a pair
   app.post("/api/pairs/:id/skip", requireAuth, async (req, res) => {
     try {
       const pairId = req.params.id;
-      const userId = req.user!.id;
+      const userId = getAuth(req).userId!;
 
       await storage.skipPair(pairId, userId);
       res.json({ success: true });
     } catch (error) {
       console.error("Error skipping pair:", error);
       res.status(500).json({ message: "Failed to skip pair" });
+    }
+  });
+
+  // ==================== CAMPAIGN MEMBERSHIP (reviewer focus) ====================
+
+  // Join a campaign via its shareable link (intentional-only association).
+  app.post("/api/campaigns/:id/join", requireAuth, async (req, res) => {
+    try {
+      const campaignId = req.params.id;
+      const userId = getAuth(req).userId!;
+      const campaign = await storage.getCampaign(campaignId);
+      if (!campaign) return res.status(404).json({ message: "Campaign not found" });
+      // Only active campaigns are joinable — draft/completed/archived joins would
+      // create memberships that never surface on the active-only reviewer home.
+      if (!isCampaignJoinable(campaign.status)) {
+        return res.status(403).json({ message: "Campaign is not open for joining" });
+      }
+      await storage.joinCampaign(campaignId, userId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error joining campaign:", error);
+      res.status(500).json({ message: "Failed to join campaign" });
+    }
+  });
+
+  // Roster of who has joined a campaign (membership-derived — includes
+  // joined-but-not-yet-voted reviewers, unlike the vote-derived analytics tab).
+  app.get("/api/campaigns/:id/roster", requireAdmin, async (req, res) => {
+    try {
+      const roster = await storage.getCampaignRoster(req.params.id);
+      res.json(roster);
+    } catch (error) {
+      console.error("Error fetching campaign roster:", error);
+      res.status(500).json({ message: "Failed to fetch campaign roster" });
     }
   });
 
@@ -527,13 +692,20 @@ export async function registerRoutes(
     }
   });
 
-  // Update user role (admin only)
+  // Update user role (admin only) — updates Clerk publicMetadata (authoritative) and local DB (cache)
   app.patch("/api/users/:id/role", requireAdmin, async (req, res) => {
     try {
       const { role } = req.body;
       if (!["reviewer", "admin"].includes(role)) {
         return res.status(400).json({ message: "Invalid role" });
       }
+      // Update Clerk publicMetadata (authoritative source for role).
+      // updateUserMetadata MERGES; updateUser({publicMetadata}) would replace
+      // the whole object and drop any other keys.
+      await clerkClient.users.updateUserMetadata(req.params.id, {
+        publicMetadata: { role },
+      });
+      // Update local DB (cache/audit)
       await storage.updateUserRole(req.params.id, role);
       res.json({ success: true });
     } catch (error) {
@@ -545,7 +717,7 @@ export async function registerRoutes(
   // Get current user stats
   app.get("/api/users/me/stats", requireAuth, async (req, res) => {
     try {
-      const userId = req.user!.id;
+      const userId = getAuth(req).userId!;
       const stats = await storage.getUserStats(userId);
       res.json(stats);
     } catch (error) {
@@ -554,10 +726,24 @@ export async function registerRoutes(
     }
   });
 
+  // Get the campaign ids the current user has joined (drives the joined-first
+  // reviewer home). Named under /api/users/me/* so it can't be shadowed by
+  // GET /api/campaigns/:id (which would match :id="mine").
+  app.get("/api/users/me/campaigns", requireAuth, async (req, res) => {
+    try {
+      const userId = getAuth(req).userId!;
+      const ids = await storage.getJoinedCampaignIds(userId);
+      res.json(ids);
+    } catch (error) {
+      console.error("Error fetching joined campaigns:", error);
+      res.status(500).json({ message: "Failed to fetch joined campaigns" });
+    }
+  });
+
   // Get current user's vote history
   app.get("/api/users/me/votes", requireAuth, async (req, res) => {
     try {
-      const userId = req.user!.id;
+      const userId = getAuth(req).userId!;
       const userVotes = await storage.getUserVotes(userId);
       res.json(userVotes);
     } catch (error) {
@@ -566,32 +752,9 @@ export async function registerRoutes(
     }
   });
 
-  // Update a vote (for corrections)
-  app.patch("/api/pairs/:id/vote", requireAuth, async (req, res) => {
-    try {
-      const pairId = req.params.id;
-      const userId = req.user!.id;
-      
-      const { scoreBinary, scoreNumeric, scoringMode, expertSelectedCode, reviewerNotes } = req.body;
-      
-      const updated = await storage.updateVote(pairId, userId, {
-        scoreBinary: scoreBinary !== undefined ? scoreBinary : undefined,
-        scoreNumeric: scoreNumeric !== undefined ? scoreNumeric : undefined,
-        scoringMode: scoringMode !== undefined ? scoringMode : undefined,
-        expertSelectedCode: expertSelectedCode !== undefined ? expertSelectedCode : undefined,
-        reviewerNotes: reviewerNotes !== undefined ? reviewerNotes : undefined,
-      });
-      
-      if (!updated) {
-        return res.status(404).json({ message: "Vote not found" });
-      }
-      
-      res.json(updated);
-    } catch (error) {
-      console.error("Error updating vote:", error);
-      res.status(500).json({ message: "Failed to update vote" });
-    }
-  });
+  // Edit a vote (correction from vote-history) — supersedes the prior vote via
+  // the same atomic create-or-supersede path as POST.
+  app.patch("/api/pairs/:id/vote", requireAuth, castVoteHandler);
 
   // ==================== ADMIN ROUTES ====================
 
@@ -606,55 +769,9 @@ export async function registerRoutes(
     }
   });
 
-  // Get allowed domains
-  app.get("/api/admin/domains", requireAdmin, async (req, res) => {
-    try {
-      const domains = await storage.getAllowedDomains();
-      res.json(domains);
-    } catch (error) {
-      console.error("Error fetching domains:", error);
-      res.status(500).json({ message: "Failed to fetch domains" });
-    }
-  });
-
-  // Add allowed domain
-  app.post("/api/admin/domains", requireAdmin, async (req, res) => {
-    try {
-      const { domain } = req.body;
-      if (!domain || typeof domain !== "string") {
-        return res.status(400).json({ message: "Domain is required" });
-      }
-      
-      const normalizedDomain = domain.trim().toLowerCase();
-      const domainRegex = /^[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,}$/;
-      if (!domainRegex.test(normalizedDomain)) {
-        return res.status(400).json({ message: "Invalid domain format. Use format: example.com" });
-      }
-      
-      const created = await storage.addAllowedDomain({
-        domain: normalizedDomain,
-        addedBy: req.user!.id,
-      });
-      res.status(201).json(created);
-    } catch (error: any) {
-      console.error("Error adding domain:", error);
-      if (error.code === "23505") {
-        return res.status(409).json({ message: "Domain already exists" });
-      }
-      res.status(500).json({ message: "Failed to add domain" });
-    }
-  });
-
-  // Remove allowed domain
-  app.delete("/api/admin/domains/:domain", requireAdmin, async (req, res) => {
-    try {
-      await storage.removeAllowedDomain(req.params.domain);
-      res.json({ success: true });
-    } catch (error) {
-      console.error("Error removing domain:", error);
-      res.status(500).json({ message: "Failed to remove domain" });
-    }
-  });
+  // Domain management is now handled via Clerk Dashboard allowlist
+  // and the ALLOWED_EMAIL_DOMAINS environment variable.
+  // The /api/admin/domains routes have been removed.
 
   // ==================== INTER-RATER RELIABILITY ====================
 
@@ -693,7 +810,7 @@ export async function registerRoutes(
         name,
         description: description || null,
         columnMappings,
-        createdBy: req.user!.id,
+        createdBy: getAuth(req).userId!,
       });
       res.status(201).json(template);
     } catch (error) {
