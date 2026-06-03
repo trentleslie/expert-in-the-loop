@@ -1,5 +1,5 @@
 import { 
-  users, campaigns, pairs, votes, allowedDomains, skippedPairs, importTemplates,
+  users, campaigns, pairs, votes, allowedDomains, skippedPairs, importTemplates, campaignMemberships,
   type User, type InsertUser,
   type Campaign, type InsertCampaign,
   type Pair, type InsertPair,
@@ -63,7 +63,12 @@ export interface IStorage {
   
   // Skipped pairs
   skipPair(pairId: string, userId: string): Promise<void>;
-  
+
+  // Campaign memberships (reviewer↔campaign "focus" association)
+  joinCampaign(campaignId: string, userId: string): Promise<void>;
+  getJoinedCampaignIds(userId: string): Promise<string[]>;
+  getCampaignRoster(campaignId: string): Promise<{ userId: string; email: string; displayName: string | null; joinedAt: Date }[]>;
+
   // Allowed domains
   isDomainAllowed(domain: string): Promise<boolean>;
   getAllowedDomains(): Promise<AllowedDomain[]>;
@@ -707,6 +712,35 @@ export class DatabaseStorage implements IStorage {
   // Skipped pairs
   async skipPair(pairId: string, userId: string): Promise<void> {
     await db.insert(skippedPairs).values({ pairId, userId }).onConflictDoNothing();
+  }
+
+  async joinCampaign(campaignId: string, userId: string): Promise<void> {
+    // Idempotent on repeat link-opens (composite unique on campaign_id, user_id).
+    await db.insert(campaignMemberships).values({ campaignId, userId }).onConflictDoNothing();
+  }
+
+  async getJoinedCampaignIds(userId: string): Promise<string[]> {
+    const rows = await db
+      .select({ campaignId: campaignMemberships.campaignId })
+      .from(campaignMemberships)
+      .where(eq(campaignMemberships.userId, userId));
+    return rows.map((r) => r.campaignId);
+  }
+
+  async getCampaignRoster(campaignId: string): Promise<{ userId: string; email: string; displayName: string | null; joinedAt: Date }[]> {
+    // Membership-derived (NOT vote-derived) — includes reviewers who joined but
+    // haven't voted yet, which the analytics Reviewers tab cannot show.
+    return db
+      .select({
+        userId: campaignMemberships.userId,
+        email: users.email,
+        displayName: users.displayName,
+        joinedAt: campaignMemberships.joinedAt,
+      })
+      .from(campaignMemberships)
+      .innerJoin(users, eq(campaignMemberships.userId, users.id))
+      .where(eq(campaignMemberships.campaignId, campaignId))
+      .orderBy(desc(campaignMemberships.joinedAt));
   }
 
   // Allowed domains

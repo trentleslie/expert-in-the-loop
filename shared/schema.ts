@@ -170,6 +170,32 @@ export const importTemplatesRelations = relations(importTemplates, ({ one }) => 
   }),
 }));
 
+// Campaign Memberships Table — reviewer↔campaign association for "focus": a
+// reviewer joins a campaign by opening its shareable link (intentional-only;
+// browsing does NOT join). Drives the joined-first reviewer home + admin roster.
+// NOT access control — the data stays a collective pool.
+export const campaignMemberships = pgTable("campaign_memberships", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  campaignId: uuid("campaign_id").references(() => campaigns.id).notNull(),
+  // onUpdate:cascade so the Clerk auth ID-migration (UPDATE users SET id=<clerkId>)
+  // re-points membership rows instead of FK-violating — like every users.id FK.
+  userId: varchar("user_id", { length: 255 }).references(() => users.id, { onUpdate: "cascade" }).notNull(),
+  joinedAt: timestamp("joined_at").defaultNow().notNull(),
+}, (table) => ({
+  uniqueMembership: unique().on(table.campaignId, table.userId),
+}));
+
+export const campaignMembershipsRelations = relations(campaignMemberships, ({ one }) => ({
+  campaign: one(campaigns, {
+    fields: [campaignMemberships.campaignId],
+    references: [campaigns.id],
+  }),
+  user: one(users, {
+    fields: [campaignMemberships.userId],
+    references: [users.id],
+  }),
+}));
+
 // Insert Schemas
 export const insertUserSchema = createInsertSchema(users).omit({
   createdAt: true,
@@ -213,6 +239,11 @@ export const insertImportTemplateSchema = createInsertSchema(importTemplates).om
   createdAt: true,
 });
 
+export const insertCampaignMembershipSchema = createInsertSchema(campaignMemberships).omit({
+  id: true,
+  joinedAt: true,
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -234,6 +265,9 @@ export type InsertSkippedPair = z.infer<typeof insertSkippedPairSchema>;
 
 export type ImportTemplate = typeof importTemplates.$inferSelect;
 export type InsertImportTemplate = z.infer<typeof insertImportTemplateSchema>;
+
+export type CampaignMembership = typeof campaignMemberships.$inferSelect;
+export type InsertCampaignMembership = z.infer<typeof insertCampaignMembershipSchema>;
 
 // Extended types for frontend
 export type CampaignWithStats = Campaign & {

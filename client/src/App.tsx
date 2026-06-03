@@ -10,6 +10,7 @@ import { AppLayout } from "@/components/app-layout";
 import { Skeleton } from "@/components/ui/skeleton";
 
 import HomePage from "@/pages/home";
+import JoinPage from "@/pages/join";
 import ReviewPage from "@/pages/review";
 import StatsPage from "@/pages/stats";
 import VoteHistoryPage from "@/pages/vote-history";
@@ -46,13 +47,16 @@ function ProtectedRoute({
   requireAdmin?: boolean;
 }) {
   const { isAuthenticated, isLoading, isAdmin } = useAuth();
+  const [location] = useLocation();
 
   if (isLoading) {
     return <LoadingScreen />;
   }
 
   if (!isAuthenticated) {
-    return <Redirect to="/login" />;
+    // Preserve the intended path (e.g. a campaign join link) so Clerk returns
+    // the user there after sign-in, instead of dropping them on a generic home.
+    return <Redirect to={`/login?redirect=${encodeURIComponent(location)}`} />;
   }
 
   if (requireAdmin && !isAdmin) {
@@ -76,10 +80,35 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// Where to send the user after sign-in. Robust across the OAuth round-trip:
+// the `?redirect=` query (set by ProtectedRoute when bouncing an unauthenticated
+// deep-link visitor) is lost on the /login/sso-callback subpath, so we persist
+// it in sessionStorage. Only relative paths are honored (no open redirects).
+function readPostSignInRedirect(): string {
+  const isRelative = (v: string | null): v is string =>
+    !!v && v.startsWith("/") && !v.startsWith("//");
+  const fromQuery = new URLSearchParams(window.location.search).get("redirect");
+  if (isRelative(fromQuery)) {
+    sessionStorage.setItem("postSignInRedirect", fromQuery);
+  } else if (window.location.pathname === "/login") {
+    // Fresh sign-in with no target — don't reuse a stale one from a prior visit.
+    sessionStorage.removeItem("postSignInRedirect");
+  }
+  const stored = sessionStorage.getItem("postSignInRedirect");
+  return isRelative(stored) ? stored : "/";
+}
+
 function ClerkSignInPage() {
+  const redirectUrl = readPostSignInRedirect();
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <SignIn routing="path" path="/login" signUpUrl="/sign-up" />
+      <SignIn
+        routing="path"
+        path="/login"
+        signUpUrl="/sign-up"
+        forceRedirectUrl={redirectUrl}
+        signUpForceRedirectUrl={redirectUrl}
+      />
     </div>
   );
 }
@@ -122,6 +151,12 @@ function Router() {
       <Route path="/">
         <ProtectedRoute>
           <HomePage />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/campaigns/:id/join">
+        <ProtectedRoute>
+          <JoinPage />
         </ProtectedRoute>
       </Route>
 
