@@ -359,8 +359,9 @@ export default function HomePage() {
                       You haven't joined any campaigns yet
                     </h3>
                     <p className="text-sm text-muted-foreground text-center max-w-sm">
-                      Open a campaign link shared by an admin to join it, or browse all
-                      active campaigns below.
+                      {isAdmin
+                        ? "Create or share a campaign from Manage Campaigns, or browse all active campaigns below."
+                        : "Open a campaign link shared by an admin to join it, or browse all active campaigns below."}
                     </p>
                   </CardContent>
                 </Card>
