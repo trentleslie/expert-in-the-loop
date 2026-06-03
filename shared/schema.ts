@@ -43,7 +43,7 @@ export const campaigns = pgTable("campaigns", {
   // Bulk evidence-status recompute lifecycle (admin config edits). A stale
   // 'running' on startup is reconciled to 'failed' and offered for retry.
   recomputeStatus: text("recompute_status").notNull().default("idle"),
-  createdBy: varchar("created_by", { length: 255 }).references(() => users.id).notNull(),
+  createdBy: varchar("created_by", { length: 255 }).references(() => users.id, { onUpdate: "cascade" }).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   status: campaignStatusEnum("status").notNull().default("draft"),
 });
@@ -99,7 +99,7 @@ export const pairsRelations = relations(pairs, ({ one, many }) => ({
 export const votes = pgTable("votes", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   pairId: uuid("pair_id").references(() => pairs.id).notNull(),
-  userId: varchar("user_id", { length: 255 }).references(() => users.id).notNull(),
+  userId: varchar("user_id", { length: 255 }).references(() => users.id, { onUpdate: "cascade" }).notNull(),
   scoreBinary: binaryScoreEnum("score_binary"),
   scoreNumeric: integer("score_numeric"),
   scoringMode: scoringModeEnum("scoring_mode").notNull(),
@@ -133,7 +133,7 @@ export const votesRelations = relations(votes, ({ one }) => ({
 export const allowedDomains = pgTable("allowed_domains", {
   domain: text("domain").primaryKey(),
   addedAt: timestamp("added_at").defaultNow().notNull(),
-  addedBy: varchar("added_by", { length: 255 }).references(() => users.id),
+  addedBy: varchar("added_by", { length: 255 }).references(() => users.id, { onUpdate: "cascade" }),
 });
 
 export const allowedDomainsRelations = relations(allowedDomains, ({ one }) => ({
@@ -147,7 +147,7 @@ export const allowedDomainsRelations = relations(allowedDomains, ({ one }) => ({
 export const skippedPairs = pgTable("skipped_pairs", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   pairId: uuid("pair_id").references(() => pairs.id).notNull(),
-  userId: varchar("user_id", { length: 255 }).references(() => users.id).notNull(),
+  userId: varchar("user_id", { length: 255 }).references(() => users.id, { onUpdate: "cascade" }).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => ({
   uniqueSkip: unique().on(table.pairId, table.userId),
@@ -158,7 +158,7 @@ export const importTemplates = pgTable("import_templates", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   description: text("description"),
-  createdBy: varchar("created_by", { length: 255 }).references(() => users.id).notNull(),
+  createdBy: varchar("created_by", { length: 255 }).references(() => users.id, { onUpdate: "cascade" }).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   columnMappings: jsonb("column_mappings").notNull(),
 });

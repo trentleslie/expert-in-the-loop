@@ -23,13 +23,21 @@ jobs:
           SSH_HOST: ${{ secrets.LIGHTSAIL_HOST }}
         run: |
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key "$SSH_USER@$SSH_HOST" << 'DEPLOY_SCRIPT'
+          set -e
           cd ~/expert-in-the-loop
           git pull origin main
           npm ci
           # NOTE: db:push removed from CI - run manually when schema changes
           # drizzle-kit push is interactive and hangs in non-TTY environments
+          # Source VITE_ env vars so Vite embeds them in the client build
+          # (VITE_CLERK_PUBLISHABLE_KEY pk_live + VITE_CLERK_PROXY_URL for the
+          # production custom-domain FAPI proxy). Parity with deploy-dev.yml.
+          set -a; source <(grep '^VITE_' .env 2>/dev/null); set +a
           npm run build
           sudo systemctl restart expert-in-the-loop
           sleep 5
-          curl -s -o /dev/null -w "%{http_code}" http://localhost:5000 | grep -q "200" && echo "App healthy" || echo "App failed to start"
+          # Real health check: with set -e a non-2xx/connection failure aborts the
+          # job. NOTE: a 200 only proves the HTTP shell serves, not that Clerk/DB
+          # are healthy — the manual post-deploy smoke test is the real gate.
+          curl -sf http://localhost:5000 > /dev/null
           DEPLOY_SCRIPT
