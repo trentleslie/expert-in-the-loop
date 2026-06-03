@@ -13,6 +13,7 @@ import {
 } from "./exportSerializer";
 import { storage } from "./storage";
 import { requireAuth, requireAdmin } from "./auth";
+import { resolveMigrationEmail } from "./authMigration";
 import { insertCampaignSchema, insertVoteSchema, type InsertPair } from "@shared/schema";
 import { RESOLUTION_LAYER_VALUES, campaignConfigSchema } from "@shared/campaignConfig";
 import { z } from "zod";
@@ -37,8 +38,14 @@ export async function registerRoutes(
       let user = await storage.getUser(userId);
       if (!user) {
         const clerkUser = await clerkClient.users.getUser(userId);
-        const email =
-          clerkUser.primaryEmailAddress?.emailAddress || "unknown@unknown.com";
+        const resolved = resolveMigrationEmail(clerkUser);
+        if (!resolved.ok) {
+          // An unverified or missing primary email must not match-and-migrate an
+          // existing local row (account takeover) nor create one under a synthetic
+          // address. Treat as unauthenticated. (Cutover guard — Unit 1b.)
+          return res.status(403).json({ message: "A verified email address is required." });
+        }
+        const email = resolved.email;
 
         // Check if user exists with this email but a different (old) ID
         const existingByEmail = await storage.getUserByEmail(email);

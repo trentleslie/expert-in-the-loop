@@ -226,7 +226,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.email, email));
+    // Case-insensitive match: the stored email (from Google OAuth) and the Clerk
+    // primary email can differ only in casing. An exact eq() would miss the match
+    // and create a duplicate row (defaulting role:'reviewer'), silently demoting
+    // an admin during the Clerk cutover.
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(sql`lower(${users.email}) = lower(${email})`);
     return user || undefined;
   }
 
@@ -244,6 +251,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateUserId(oldId: string, newId: string): Promise<void> {
+    // Re-points the user's PK (legacy Google-OAuth id -> Clerk id) on first login.
+    // Relies on ON UPDATE CASCADE on every users.id FK (campaigns.created_by,
+    // votes.user_id, allowed_domains.added_by, skipped_pairs.user_id,
+    // import_templates.created_by) — without it this UPDATE FK-violates for any
+    // user who owns rows. See migration-001 + shared/schema.ts onUpdate:"cascade".
     await db.update(users).set({ id: newId }).where(eq(users.id, oldId));
   }
 
