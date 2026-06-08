@@ -108,7 +108,7 @@ function EntityBlock({
 
       {text ? (
         <p className="text-sm text-foreground font-medium leading-snug">
-          {text.split("\u2028").map((line, i) => (
+          {text.split("\u2028").filter(Boolean).map((line, i) => (
             <span key={i} className="block">{line}</span>
           ))}
         </p>
