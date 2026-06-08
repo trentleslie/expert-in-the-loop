@@ -107,7 +107,11 @@ function EntityBlock({
       </div>
 
       {text ? (
-        <p className="text-sm text-foreground font-medium leading-snug">{text}</p>
+        <p className="text-sm text-foreground font-medium leading-snug">
+          {text.split("\u2028").map((line, i) => (
+            <span key={i} className="block">{line}</span>
+          ))}
+        </p>
       ) : (
         <p className="text-sm text-muted-foreground italic">— no text mapped —</p>
       )}
