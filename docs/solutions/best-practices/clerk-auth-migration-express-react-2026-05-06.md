@@ -1,6 +1,7 @@
 ---
 title: "Clerk Authentication Migration for Express + React (Passport.js/Google OAuth to Clerk)"
 date: 2026-05-06
+last_updated: 2026-06-03
 category: best-practices
 module: authentication
 problem_type: best_practice
@@ -33,14 +34,14 @@ Migrating expert-in-the-loop (Express + React/Vite/wouter) from Passport.js with
 ### Server-side
 
 - Use `@clerk/express` with `clerkMiddleware()` mounted globally **before body parsers** in the Express middleware chain. Write custom `requireAuth` and `requireAdmin` guards using `getAuth(req)` — Clerk's built-in `requireAuth` issues redirects, not 401 JSON responses.
-- Set up a FAPI proxy at `/api/__clerk` using `http-proxy-middleware`. Only active in production — Clerk dev instances bypass the proxy.
-- Store user roles in Clerk `publicMetadata`. Expose via custom session token claim (`"role": "{{user.public_metadata.role}}"`) so `getAuth(req).sessionClaims.role` works without an API call per request.
+- Set up a FAPI proxy at `/api/__clerk` using `http-proxy-middleware`. Only active in production — Clerk dev instances bypass the proxy. **⚠️ Update (2026-06-03): this was wrong for a custom-domain (CNAME) production instance** — the client must hit the CNAME FAPI directly, and the proxy caused an "unable to attribute this request" 400. Decode `pk_live` to check the prod instance's FAPI mode *before* choosing proxy vs direct; the proxy was later removed entirely. See the prod-cutover doc under Related.
+- Store user roles in Clerk `publicMetadata`. Expose via custom session token claim (`"role": "{{user.public_metadata.role}}"`) so `getAuth(req).sessionClaims.role` works without an API call per request. **⚠️ This claim is per-instance and is NOT copied dev→prod** — a missing claim on the production instance 403s every admin (see the prod-cutover doc).
 - Use Clerk Dashboard allowlist for domain restriction. Remove server-side domain checks — they add a fragile dependency on session claim availability that varies between dev and production tokens.
 - Implement find-or-create on `/api/auth/me` with email-based fallback for migrating old user IDs.
 
 ### Client-side
 
-- Wrap app in `<ClerkProvider>` with `publishableKey`, `proxyUrl` (undefined in dev, set in production), and `routerPush`/`routerReplace` props for wouter compatibility.
+- Wrap app in `<ClerkProvider>` with `publishableKey`, `proxyUrl` (undefined in dev, set in production), and `routerPush`/`routerReplace` props for wouter compatibility. **⚠️ (2026-06-03): leave `proxyUrl` unset for a custom-domain (CNAME) production instance too** — see the prod-cutover doc under Related.
 - Replace custom `AuthProvider`/`useAuth()` with a thin wrapper over Clerk hooks (`useUser`, `useAuth`, `useClerk`) that maintains the same API shape to minimize component changes.
 - Use Clerk's `<SignIn>` and `<SignUp>` components with `routing="path"`.
 
@@ -125,6 +126,7 @@ When using `npx clerk config patch` to set `allowlist_enabled: true`, the change
 
 ## Related
 
+- **Prod-cutover sequel (2026-06-03):** `docs/solutions/integration-issues/clerk-prod-cutover-attribution-and-admin-403-2026-06-03.md` — the production failures this dev-side pattern did not anticipate: CNAME-vs-proxy "unable to attribute" 400, the missing per-instance session-token `role` claim (admin 403), and plan-gated allowlist. **Per-instance config (FAPI mode, session-token claims, allowlist) is NOT inherited from dev** — configure it explicitly on the prod instance.
 - **Reference implementation:** biomapper-ui `artifacts/api-server/src/app.ts` (same Clerk account, Express backend, production proxy pattern)
 - **Sibling docs:** kraken-chatbot `docs/solutions/best-practices/clerk-auth-react-fastapi-integration-2026-05-06.md` (FastAPI pattern, shared pitfalls on wouter compat and JWT email claims)
 - **Migration plan:** `docs/plans/2026-05-06-002-feat-clerk-auth-migration-plan.md`

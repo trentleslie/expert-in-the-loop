@@ -134,8 +134,10 @@ function EntityCard({
         </div>
       </CardHeader>
       <CardContent className="flex-1 flex flex-col">
-        <p className="text-lg text-foreground leading-relaxed flex-1 break-words overflow-hidden" data-testid={`text-entity-${type}`}>
-          {text}
+        <p className="text-lg text-foreground leading-relaxed flex-1 min-h-0 max-h-[50vh] break-words overflow-y-auto" data-testid={`text-entity-${type}`}>
+          {text.split("\u2028").filter(Boolean).map((line, i) => (
+            <span key={i} className="block">{line}</span>
+          ))}
         </p>
         <div className="mt-4 pt-3 border-t border-border space-y-2">
           <p className="text-sm font-mono text-muted-foreground" data-testid={`text-entity-id-${type}`}>
