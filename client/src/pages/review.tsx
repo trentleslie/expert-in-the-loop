@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { resolveExpandedPanels, REVIEW_PANELS_STORAGE_KEY } from "@/lib/reviewPanels";
 import { ScoringControls, type BinaryValue } from "@/components/ScoringControls";
 import {
   SkipForward,
@@ -246,20 +247,27 @@ export default function ReviewPage() {
   const [expertSelectedCode, setExpertSelectedCode] = useState<string | null>(null);
   const [reviewerNotes, setReviewerNotes] = useState("");
 
-  // Accordion panel state with localStorage persistence
-  const [expandedPanels, setExpandedPanels] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem("review-expanded-panels");
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  // Accordion panel state with localStorage persistence. A fresh reviewer gets
+  // the instructions panel open by default (resolveExpandedPanels); a stored
+  // preference — including a deliberate collapse — wins.
+  const [expandedPanels, setExpandedPanels] = useState<string[]>(() =>
+    resolveExpandedPanels(localStorage.getItem(REVIEW_PANELS_STORAGE_KEY)),
+  );
 
   // Persist expanded panels to localStorage
   useEffect(() => {
-    localStorage.setItem("review-expanded-panels", JSON.stringify(expandedPanels));
+    localStorage.setItem(REVIEW_PANELS_STORAGE_KEY, JSON.stringify(expandedPanels));
   }, [expandedPanels]);
+
+  // Per-panel value/onChange helpers: the instructions and LLM-reasoning panels
+  // live in separate Accordions (above vs. below the comparison cards) but share
+  // one persisted array, so each accordion must preserve the other's open state
+  // on change rather than overwrite the whole list.
+  const panelProps = (panel: string) => ({
+    value: expandedPanels.includes(panel) ? [panel] : [],
+    onValueChange: (vals: string[]) =>
+      setExpandedPanels((prev) => [...prev.filter((v) => v !== panel), ...vals]),
+  });
 
   // Pending vote state for confirmation dialog
   const [pendingVote, setPendingVote] = useState<{
@@ -570,6 +578,27 @@ export default function ReviewPage() {
           </Card>
         ) : (
           <>
+            {/* Campaign Instructions — surfaced at the top, expanded by default.
+                Treat null/empty/whitespace as "no instructions" (the field can be
+                cleared from the admin Configure dialog). */}
+            {campaign?.instructions && campaign.instructions.trim() !== "" && (
+              <Accordion type="multiple" {...panelProps("instructions")} className="space-y-2">
+                <AccordionItem value="instructions" className="border rounded-lg px-4">
+                  <AccordionTrigger className="hover:no-underline py-3">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <FileText className="w-4 h-4 text-muted-foreground" />
+                      <span>Campaign Instructions</span>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent className="pb-4">
+                    <div className="text-sm text-muted-foreground whitespace-pre-wrap bg-muted/50 rounded-md p-3">
+                      {campaign.instructions}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            )}
+
             {/* Entity comparison */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <EntityCard
@@ -590,30 +619,13 @@ export default function ReviewPage() {
               />
             </div>
 
-            {/* Collapsible context panels */}
+            {/* Collapsible context panels (LLM reasoning stays below the cards
+                so reviewers form their own judgment first). */}
             <Accordion
               type="multiple"
-              value={expandedPanels}
-              onValueChange={setExpandedPanels}
+              {...panelProps("llm-reasoning")}
               className="space-y-2"
             >
-              {/* Campaign Instructions Panel */}
-              {campaign?.instructions && (
-                <AccordionItem value="instructions" className="border rounded-lg px-4">
-                  <AccordionTrigger className="hover:no-underline py-3">
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <FileText className="w-4 h-4 text-muted-foreground" />
-                      <span>Campaign Instructions</span>
-                    </div>
-                  </AccordionTrigger>
-                  <AccordionContent className="pb-4">
-                    <div className="text-sm text-muted-foreground whitespace-pre-wrap bg-muted/50 rounded-md p-3">
-                      {campaign.instructions}
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              )}
-
               {/* LLM Reasoning Panel */}
               {(pairData.pair.llmReasoning || pairData.pair.llmConfidence !== null) && (
                 <AccordionItem value="llm-reasoning" className="border rounded-lg px-4">
