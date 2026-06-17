@@ -38,6 +38,7 @@ export interface IStorage {
   createCampaign(campaign: InsertCampaign): Promise<Campaign>;
   updateCampaignStatus(id: string, status: Campaign["status"]): Promise<void>;
   updateCampaignConfig(id: string, config: CampaignConfig): Promise<void>;
+  updateCampaignDetails(id: string, fields: { name: string; description: string | null; instructions: string | null }): Promise<void>;
   recomputeCampaignEvidenceStatus(campaignId: string): Promise<{ recomputed: number; status: "done" | "failed" }>;
   reconcileStaleRecomputes(): Promise<void>;
   getDistinctCampaignTypes(): Promise<string[]>;
@@ -367,6 +368,19 @@ export class DatabaseStorage implements IStorage {
 
   async updateCampaignConfig(id: string, config: CampaignConfig): Promise<void> {
     await db.update(campaigns).set({ config }).where(eq(campaigns.id, id));
+  }
+
+  async updateCampaignDetails(
+    id: string,
+    fields: { name: string; description: string | null; instructions: string | null },
+  ): Promise<void> {
+    // Explicit allowlist — never spread a request body here. This is the guard
+    // against mass-assignment of server-managed columns (campaignType, config,
+    // status, createdBy) through the details PATCH path.
+    await db
+      .update(campaigns)
+      .set({ name: fields.name, description: fields.description, instructions: fields.instructions })
+      .where(eq(campaigns.id, id));
   }
 
   /**
