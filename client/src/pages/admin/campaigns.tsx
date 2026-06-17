@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -440,9 +440,11 @@ function EditConfigDialog({
   const [confirmOpen, setConfirmOpen] = useState(false);
   // Editable campaign details (name/description/instructions). Saved via their
   // own PATCH, decoupled from the config save + recompute flow below.
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [instructions, setInstructions] = useState("");
+  // Initialized from the list-row prop (available at mount) so the dialog never
+  // flashes a "name required" error before the detail fetch seeds it.
+  const [name, setName] = useState(campaign.name ?? "");
+  const [description, setDescription] = useState(campaign.description ?? "");
+  const [instructions, setInstructions] = useState(campaign.instructions ?? "");
 
   // Load the campaign's stored config (or the default) when the dialog opens.
   // GET /api/campaigns/:id returns a base Campaign (which already carries
@@ -463,17 +465,24 @@ function EditConfigDialog({
     staleTime: 0,
   });
 
+  // Seed config + editable details from the freshly-fetched campaign exactly
+  // ONCE per open. Re-seeding on every fullCampaign change would clobber the
+  // admin's in-flight edits when the post-save detail refetch lands (the
+  // details save invalidates this very query key).
+  const seededRef = useRef(false);
   useEffect(() => {
-    if (open) {
-      const parsed = campaignConfigSchema.safeParse(fullCampaign?.config);
-      setConfig(parsed.success ? parsed.data : DEFAULT_CAMPAIGN_CONFIG);
-      // Seed editable details from the freshly-fetched campaign (fall back to the
-      // list-row values until the detail fetch lands).
-      setName(fullCampaign?.name ?? campaign.name ?? "");
-      setDescription(fullCampaign?.description ?? campaign.description ?? "");
-      setInstructions(fullCampaign?.instructions ?? campaign.instructions ?? "");
+    if (!open) {
+      seededRef.current = false; // reset so the next open re-seeds
+      return;
     }
-  }, [open, fullCampaign, campaign.name, campaign.description, campaign.instructions]);
+    if (seededRef.current || fullCampaign === undefined) return;
+    const parsed = campaignConfigSchema.safeParse(fullCampaign.config);
+    setConfig(parsed.success ? parsed.data : DEFAULT_CAMPAIGN_CONFIG);
+    setName(fullCampaign.name ?? "");
+    setDescription(fullCampaign.description ?? "");
+    setInstructions(fullCampaign.instructions ?? "");
+    seededRef.current = true;
+  }, [open, fullCampaign]);
 
   // A stale 'running' loaded from the server means a prior recompute was
   // interrupted (crash) — surface a retry affordance.
