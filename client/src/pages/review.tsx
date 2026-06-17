@@ -28,6 +28,9 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { resolveExpandedPanels, REVIEW_PANELS_STORAGE_KEY } from "@/lib/reviewPanels";
+import { getConfirmBeforeSubmit, setConfirmBeforeSubmit } from "@/lib/reviewPreferences";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { ScoringControls, type BinaryValue } from "@/components/ScoringControls";
 import {
   SkipForward,
@@ -368,57 +371,76 @@ export default function ReviewPage() {
     },
   });
 
-  const handleBinaryVote = useCallback((score: "match" | "no_match" | "unsure") => {
-    if (pairData?.pair) {
-      setPendingVote({ type: 'binary', value: score });
-    }
-  }, [pairData?.pair]);
+  // Per-reviewer toggle: when off, votes/skips submit immediately (no dialog).
+  // Default on. Persisted in localStorage.
+  const [confirmBeforeSubmit, setConfirmBeforeSubmitState] = useState<boolean>(() => getConfirmBeforeSubmit());
+  const handleToggleConfirm = useCallback((checked: boolean) => {
+    setConfirmBeforeSubmitState(checked);
+    setConfirmBeforeSubmit(checked);
+  }, []);
 
-  const handleNumericVote = useCallback((score: number) => {
-    if (pairData?.pair) {
-      setPendingVote({ type: 'numeric', value: score });
-    }
-  }, [pairData?.pair]);
+  // Direct-submit functions take the value explicitly so both the dialog path
+  // and the no-dialog (toggle-off) path share one code path. Notes/expert-code
+  // are read from state at call time.
+  const submitBinaryVote = useCallback((value: "match" | "no_match" | "unsure") => {
+    if (!pairData?.pair) return;
+    voteMutation.mutate({
+      pairId: pairData.pair.id,
+      scoreBinary: value,
+      scoreNumeric: null,
+      scoringMode: scoring.mode,
+      expertCode: expertSelectedCode,
+      notes: reviewerNotes,
+    });
+  }, [pairData?.pair, voteMutation, scoring.mode, expertSelectedCode, reviewerNotes]);
 
-  const handleSkip = useCallback(() => {
-    if (pairData?.pair) {
-      setPendingSkip(true);
-    }
-  }, [pairData?.pair]);
+  const submitNumericVote = useCallback((value: number) => {
+    if (!pairData?.pair) return;
+    voteMutation.mutate({
+      pairId: pairData.pair.id,
+      scoreBinary: null,
+      scoreNumeric: value,
+      scoringMode: scoring.mode,
+      expertCode: expertSelectedCode,
+      notes: reviewerNotes,
+    });
+  }, [pairData?.pair, voteMutation, scoring.mode, expertSelectedCode, reviewerNotes]);
 
-  // Confirmation handlers that execute the actual mutations
-  const confirmVote = useCallback(() => {
-    if (!pendingVote || !pairData?.pair) return;
-
-    // Send values matching the campaign config's scoring mode; the server
-    // derives scoringMode from config and rejects shape mismatches.
-    if (pendingVote.type === 'binary') {
-      voteMutation.mutate({
-        pairId: pairData.pair.id,
-        scoreBinary: pendingVote.value,
-        scoreNumeric: null,
-        scoringMode: scoring.mode,
-        expertCode: expertSelectedCode,
-        notes: reviewerNotes,
-      });
-    } else {
-      voteMutation.mutate({
-        pairId: pairData.pair.id,
-        scoreBinary: null,
-        scoreNumeric: pendingVote.value,
-        scoringMode: scoring.mode,
-        expertCode: expertSelectedCode,
-        notes: reviewerNotes,
-      });
-    }
-    setPendingVote(null);
-  }, [pendingVote, pairData?.pair, voteMutation, expertSelectedCode, reviewerNotes, scoring.mode]);
-
-  const confirmSkip = useCallback(() => {
+  const submitSkip = useCallback(() => {
     if (!pairData?.pair) return;
     skipMutation.mutate(pairData.pair.id);
-    setPendingSkip(false);
   }, [pairData?.pair, skipMutation]);
+
+  const handleBinaryVote = useCallback((score: "match" | "no_match" | "unsure") => {
+    if (!pairData?.pair) return;
+    if (confirmBeforeSubmit) setPendingVote({ type: 'binary', value: score });
+    else submitBinaryVote(score);
+  }, [pairData?.pair, confirmBeforeSubmit, submitBinaryVote]);
+
+  const handleNumericVote = useCallback((score: number) => {
+    if (!pairData?.pair) return;
+    if (confirmBeforeSubmit) setPendingVote({ type: 'numeric', value: score });
+    else submitNumericVote(score);
+  }, [pairData?.pair, confirmBeforeSubmit, submitNumericVote]);
+
+  const handleSkip = useCallback(() => {
+    if (!pairData?.pair) return;
+    if (confirmBeforeSubmit) setPendingSkip(true);
+    else submitSkip();
+  }, [pairData?.pair, confirmBeforeSubmit, submitSkip]);
+
+  // Dialog confirm handlers delegate to the shared submit functions.
+  const confirmVote = useCallback(() => {
+    if (!pendingVote) return;
+    if (pendingVote.type === 'binary') submitBinaryVote(pendingVote.value);
+    else submitNumericVote(pendingVote.value);
+    setPendingVote(null);
+  }, [pendingVote, submitBinaryVote, submitNumericVote]);
+
+  const confirmSkip = useCallback(() => {
+    submitSkip();
+    setPendingSkip(false);
+  }, [submitSkip]);
 
   const cancelPendingAction = useCallback(() => {
     setPendingVote(null);
@@ -428,6 +450,11 @@ export default function ReviewPage() {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore auto-repeat from a held key. Critical in no-confirm mode, where a
+      // held vote/skip key would otherwise chain-submit onto the next pair before
+      // the reviewer sees it.
+      if (e.repeat) return;
+
       // Handle dialog keyboard shortcuts first
       if (pendingVote || pendingSkip) {
         if (e.key === "Enter") {
@@ -757,6 +784,18 @@ export default function ReviewPage() {
                   <SkipForward className="w-4 h-4" />
                   Skip
                 </Button>
+              </div>
+
+              <div className="flex items-center justify-center gap-2 pt-1">
+                <Switch
+                  id="confirm-before-submit"
+                  checked={confirmBeforeSubmit}
+                  onCheckedChange={handleToggleConfirm}
+                  data-testid="switch-confirm-before-submit"
+                />
+                <Label htmlFor="confirm-before-submit" className="text-xs text-muted-foreground font-normal cursor-pointer">
+                  Confirm before submitting
+                </Label>
               </div>
             </div>
 
