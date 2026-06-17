@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveExpandedPanels, DEFAULT_EXPANDED_PANELS } from "./reviewPanels";
+import { resolveExpandedPanels, getStoredExpandedPanels, DEFAULT_EXPANDED_PANELS } from "./reviewPanels";
 
 describe("resolveExpandedPanels", () => {
   it("defaults to instructions open when nothing is stored", () => {
@@ -34,5 +34,17 @@ describe("resolveExpandedPanels", () => {
   it("does not return the shared module-level default array (no mutation leak)", () => {
     const result = resolveExpandedPanels(null);
     expect(result).not.toBe(DEFAULT_EXPANDED_PANELS);
+  });
+});
+
+describe("getStoredExpandedPanels", () => {
+  it("falls back to default when localStorage access throws", () => {
+    (globalThis as { localStorage?: Storage }).localStorage = {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+    } as unknown as Storage;
+    expect(getStoredExpandedPanels()).toEqual(DEFAULT_EXPANDED_PANELS);
+    delete (globalThis as { localStorage?: Storage }).localStorage;
   });
 });

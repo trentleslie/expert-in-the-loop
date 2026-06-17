@@ -27,3 +27,15 @@ export function resolveExpandedPanels(raw: string | null): string[] {
     return [...DEFAULT_EXPANDED_PANELS];
   }
 }
+
+/**
+ * Read the persisted panel state from localStorage, falling back to the default
+ * if storage access itself throws (private mode, storage disabled by policy).
+ */
+export function getStoredExpandedPanels(): string[] {
+  try {
+    return resolveExpandedPanels(localStorage.getItem(REVIEW_PANELS_STORAGE_KEY));
+  } catch {
+    return [...DEFAULT_EXPANDED_PANELS];
+  }
+}

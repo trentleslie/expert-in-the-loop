@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { resolveExpandedPanels, REVIEW_PANELS_STORAGE_KEY } from "@/lib/reviewPanels";
+import { getStoredExpandedPanels, REVIEW_PANELS_STORAGE_KEY } from "@/lib/reviewPanels";
 import { getConfirmBeforeSubmit, setConfirmBeforeSubmit } from "@/lib/reviewPreferences";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -253,13 +253,15 @@ export default function ReviewPage() {
   // Accordion panel state with localStorage persistence. A fresh reviewer gets
   // the instructions panel open by default (resolveExpandedPanels); a stored
   // preference — including a deliberate collapse — wins.
-  const [expandedPanels, setExpandedPanels] = useState<string[]>(() =>
-    resolveExpandedPanels(localStorage.getItem(REVIEW_PANELS_STORAGE_KEY)),
-  );
+  const [expandedPanels, setExpandedPanels] = useState<string[]>(() => getStoredExpandedPanels());
 
-  // Persist expanded panels to localStorage
+  // Persist expanded panels to localStorage (best-effort; ignore storage errors)
   useEffect(() => {
-    localStorage.setItem(REVIEW_PANELS_STORAGE_KEY, JSON.stringify(expandedPanels));
+    try {
+      localStorage.setItem(REVIEW_PANELS_STORAGE_KEY, JSON.stringify(expandedPanels));
+    } catch {
+      /* ignore (private mode / quota) */
+    }
   }, [expandedPanels]);
 
   // Per-panel value/onChange helpers: the instructions and LLM-reasoning panels

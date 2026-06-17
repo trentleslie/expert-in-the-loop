@@ -19,7 +19,7 @@ describe("updateCampaignDetailsSchema", () => {
     expect(updateCampaignDetailsSchema.parse({ name: "  Padded  " }).name).toBe("Padded");
   });
 
-  it("coerces empty / whitespace-only description and instructions to null", () => {
+  it("coerces explicit empty / whitespace-only description and instructions to null (clear)", () => {
     const result = updateCampaignDetailsSchema.parse({
       name: "Campaign",
       description: "",
@@ -29,10 +29,10 @@ describe("updateCampaignDetailsSchema", () => {
     expect(result.instructions).toBeNull();
   });
 
-  it("allows description/instructions to be omitted (partial) -> null", () => {
+  it("leaves omitted description/instructions as undefined (partial update — untouched)", () => {
     const result = updateCampaignDetailsSchema.parse({ name: "Campaign" });
-    expect(result.description).toBeNull();
-    expect(result.instructions).toBeNull();
+    expect(result.description).toBeUndefined();
+    expect(result.instructions).toBeUndefined();
   });
 
   it("accepts instructions of exactly 2000 chars but rejects 2001", () => {
