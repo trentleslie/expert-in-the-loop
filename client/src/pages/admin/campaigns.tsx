@@ -255,6 +255,9 @@ function CreateCampaignDialog({ onSuccess }: { onSuccess: () => void }) {
                     />
                   </FormControl>
                   <FormMessage />
+                  <p className="text-xs text-muted-foreground">
+                    Choose carefully — the campaign type can't be changed after the campaign is created.
+                  </p>
                 </FormItem>
               )}
             />
@@ -435,6 +438,11 @@ function EditConfigDialog({
   const { toast } = useToast();
   const [config, setConfig] = useState<CampaignConfig>(DEFAULT_CAMPAIGN_CONFIG);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // Editable campaign details (name/description/instructions). Saved via their
+  // own PATCH, decoupled from the config save + recompute flow below.
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [instructions, setInstructions] = useState("");
 
   // Load the campaign's stored config (or the default) when the dialog opens.
   // GET /api/campaigns/:id returns a base Campaign (which already carries
@@ -459,8 +467,13 @@ function EditConfigDialog({
     if (open) {
       const parsed = campaignConfigSchema.safeParse(fullCampaign?.config);
       setConfig(parsed.success ? parsed.data : DEFAULT_CAMPAIGN_CONFIG);
+      // Seed editable details from the freshly-fetched campaign (fall back to the
+      // list-row values until the detail fetch lands).
+      setName(fullCampaign?.name ?? campaign.name ?? "");
+      setDescription(fullCampaign?.description ?? campaign.description ?? "");
+      setInstructions(fullCampaign?.instructions ?? campaign.instructions ?? "");
     }
-  }, [open, fullCampaign]);
+  }, [open, fullCampaign, campaign.name, campaign.description, campaign.instructions]);
 
   // A stale 'running' loaded from the server means a prior recompute was
   // interrupted (crash) — surface a retry affordance.
@@ -492,6 +505,39 @@ function EditConfigDialog({
       toast({ title: "Error", description: "Failed to save campaign config.", variant: "destructive" });
     },
   });
+
+  const trimmedName = name.trim();
+  const nameValid = trimmedName.length > 0 && trimmedName.length <= 255;
+
+  const detailsMutation = useMutation({
+    mutationFn: () =>
+      apiRequest("PATCH", `/api/campaigns/${campaign.id}`, {
+        name: trimmedName,
+        description,
+        instructions,
+      }),
+    onSuccess: () => {
+      toast({ title: "Details saved" });
+      // Refresh both detail keys (admin single-string + review-page array key)
+      // and the list prefix so edited instructions appear without a hard reload.
+      // See docs/solutions/.../getqueryfn-querykey-footgun.
+      queryClient.invalidateQueries({ queryKey: [`/api/campaigns/${campaign.id}`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/campaigns/${campaign.id}`, "detail", campaign.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
+      onUpdate();
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to save campaign details.", variant: "destructive" });
+    },
+  });
+
+  const handleSaveDetails = () => {
+    if (!nameValid) {
+      toast({ title: "Name required", description: "Enter a campaign name (1–255 characters).", variant: "destructive" });
+      return;
+    }
+    detailsMutation.mutate();
+  };
 
   const handleSave = () => {
     if (!configValid) {
@@ -526,6 +572,63 @@ function EditConfigDialog({
             <span>The last recompute failed. Save again to retry.</span>
           </div>
         )}
+
+        {/* Editable details — saved independently of the scoring/display config
+            below so editing instructions never triggers an evidence recompute. */}
+        <div className="space-y-4 rounded-md border border-border p-4">
+          <div className="space-y-2">
+            <Label htmlFor="edit-campaign-name">Campaign Name</Label>
+            <Input
+              id="edit-campaign-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={255}
+              data-testid="input-edit-campaign-name"
+            />
+            {!nameValid && (
+              <p className="text-xs text-destructive">A campaign name is required.</p>
+            )}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-campaign-description">Description (Optional)</Label>
+            <Textarea
+              id="edit-campaign-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="resize-none"
+              rows={3}
+              maxLength={5000}
+              data-testid="input-edit-campaign-description"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-campaign-instructions">Reviewer Instructions (Optional)</Label>
+            <Textarea
+              id="edit-campaign-instructions"
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+              className="resize-none"
+              rows={4}
+              maxLength={2000}
+              data-testid="input-edit-campaign-instructions"
+            />
+            <p className="text-xs text-muted-foreground">
+              Shown to reviewers in a panel at the top of the review page.
+            </p>
+          </div>
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleSaveDetails}
+              disabled={detailsMutation.isPending || !nameValid}
+              data-testid="button-save-details"
+            >
+              {detailsMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Save details
+            </Button>
+          </div>
+        </div>
 
         <CampaignConfigEditor value={config} onChange={setConfig} />
 
