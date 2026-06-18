@@ -212,6 +212,29 @@ export const insertCampaignSchema = createInsertSchema(campaigns, {
   recomputeStatus: true, // server-managed lifecycle field
 });
 
+// Editable campaign detail fields (admin "Configure Campaign" dialog). Distinct
+// from insertCampaignSchema: only name/description/instructions are touched here,
+// never campaignType/config/status/createdBy (those are create-only or have their
+// own endpoints). Empty/whitespace-only description/instructions coerce to null so
+// the review page never renders a blank instructions panel.
+// Omitted (undefined) fields stay undefined so the storage layer can leave them
+// untouched (true partial update); an explicit "" / whitespace clears the field
+// to null. name is always required on a details edit.
+export const updateCampaignDetailsSchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(255),
+  description: z
+    .string()
+    .max(5000)
+    .nullish()
+    .transform((v) => (v === undefined ? undefined : v && v.trim() !== "" ? v : null)),
+  instructions: z
+    .string()
+    .max(2000)
+    .nullish()
+    .transform((v) => (v === undefined ? undefined : v && v.trim() !== "" ? v : null)),
+});
+export type UpdateCampaignDetails = z.infer<typeof updateCampaignDetailsSchema>;
+
 export const insertPairSchema = createInsertSchema(pairs).omit({
   id: true,
   createdAt: true,
