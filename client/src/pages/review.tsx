@@ -431,18 +431,22 @@ export default function ReviewPage() {
     else submitSkip();
   }, [pairData?.pair, confirmBeforeSubmit, submitSkip]);
 
-  // Dialog confirm handlers delegate to the shared submit functions.
+  // Dialog confirm handlers delegate to the shared submit functions. Guard on
+  // pairData?.pair BEFORE closing the dialog: the submit functions no-op without
+  // a pair, so closing unconditionally would silently drop the action (dialog
+  // shuts, no vote recorded, no feedback). Keep the dialog open instead.
   const confirmVote = useCallback(() => {
-    if (!pendingVote) return;
+    if (!pendingVote || !pairData?.pair) return;
     if (pendingVote.type === 'binary') submitBinaryVote(pendingVote.value);
     else submitNumericVote(pendingVote.value);
     setPendingVote(null);
-  }, [pendingVote, submitBinaryVote, submitNumericVote]);
+  }, [pendingVote, pairData?.pair, submitBinaryVote, submitNumericVote]);
 
   const confirmSkip = useCallback(() => {
+    if (!pairData?.pair) return;
     submitSkip();
     setPendingSkip(false);
-  }, [submitSkip]);
+  }, [pairData?.pair, submitSkip]);
 
   const cancelPendingAction = useCallback(() => {
     setPendingVote(null);

@@ -158,6 +158,13 @@ export async function registerRoutes(
   // body has no `status`, so validating it unconditionally would 400 every edit.
   app.patch("/api/campaigns/:id", requireAdmin, async (req, res) => {
     try {
+      // 404 on a missing campaign so a no-op UPDATE can't masquerade as success
+      // (mirrors PUT /:id/config). Covers both the status and details branches.
+      const existing = await storage.getCampaign(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Campaign not found" });
+      }
+
       const body = (req.body ?? {}) as Record<string, unknown>;
       const hasStatus = body.status !== undefined;
       const hasDetails = ["name", "description", "instructions"].some((k) => body[k] !== undefined);
