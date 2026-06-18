@@ -15,7 +15,7 @@ import { storage } from "./storage";
 import { requireAuth, requireAdmin } from "./auth";
 import { resolveMigrationEmail } from "./authMigration";
 import { isCampaignJoinable } from "./campaignMembership";
-import { insertCampaignSchema, insertVoteSchema, type InsertPair } from "@shared/schema";
+import { insertCampaignSchema, insertVoteSchema, updateCampaignDetailsSchema, type InsertPair, type Campaign } from "@shared/schema";
 import { RESOLUTION_LAYER_VALUES, campaignConfigSchema } from "@shared/campaignConfig";
 import { z } from "zod";
 
@@ -152,14 +152,46 @@ export async function registerRoutes(
   });
 
   // Update campaign status (admin only)
+  // Two mutually-exclusive update paths share this route, dispatched on body
+  // shape: a status change (lifecycle) OR a detail edit (name/description/
+  // instructions). The status guard must live INSIDE its branch — a details-only
+  // body has no `status`, so validating it unconditionally would 400 every edit.
   app.patch("/api/campaigns/:id", requireAdmin, async (req, res) => {
     try {
-      const { status } = req.body;
-      if (!["draft", "active", "completed", "archived"].includes(status)) {
-        return res.status(400).json({ message: "Invalid status" });
+      // 404 on a missing campaign so a no-op UPDATE can't masquerade as success
+      // (mirrors PUT /:id/config). Covers both the status and details branches.
+      const existing = await storage.getCampaign(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Campaign not found" });
       }
-      await storage.updateCampaignStatus(req.params.id, status);
-      res.json({ success: true });
+
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const hasStatus = body.status !== undefined;
+      const hasDetails = ["name", "description", "instructions"].some((k) => body[k] !== undefined);
+
+      if (hasStatus && hasDetails) {
+        return res.status(400).json({ message: "Update either status or details, not both" });
+      }
+
+      if (hasStatus) {
+        const { status } = body as { status: unknown };
+        if (typeof status !== "string" || !["draft", "active", "completed", "archived"].includes(status)) {
+          return res.status(400).json({ message: "Invalid status" });
+        }
+        await storage.updateCampaignStatus(req.params.id, status as Campaign["status"]);
+        return res.json({ success: true });
+      }
+
+      if (hasDetails) {
+        const parsed = updateCampaignDetailsSchema.safeParse(body);
+        if (!parsed.success) {
+          return res.status(400).json({ message: "Invalid campaign details", errors: parsed.error.flatten() });
+        }
+        await storage.updateCampaignDetails(req.params.id, parsed.data);
+        return res.json({ success: true });
+      }
+
+      return res.status(400).json({ message: "No updatable fields provided" });
     } catch (error) {
       console.error("Error updating campaign:", error);
       res.status(500).json({ message: "Failed to update campaign" });
