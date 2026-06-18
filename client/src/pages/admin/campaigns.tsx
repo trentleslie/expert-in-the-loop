@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { getArchivedSectionCollapsed, setArchivedSectionCollapsed } from "@/lib/adminPreferences";
 import {
   Plus,
   MoreVertical,
@@ -954,6 +955,14 @@ export default function AdminCampaigns() {
     queryClient.invalidateQueries({ queryKey: ["/api/users/me/stats"] });
   };
 
+  // Archived section is collapsed by default to declutter; the choice persists
+  // per-browser (localStorage).
+  const [archivedCollapsed, setArchivedCollapsed] = useState(() => getArchivedSectionCollapsed());
+  const handleArchivedOpenChange = (open: boolean) => {
+    setArchivedCollapsed(!open);
+    setArchivedSectionCollapsed(!open);
+  };
+
   const groupedCampaigns = {
     active: campaigns?.filter(c => c.status === "active") || [],
     draft: campaigns?.filter(c => c.status === "draft") || [],
@@ -1028,16 +1037,28 @@ export default function AdminCampaigns() {
               </div>
             )}
 
-            {/* Archived Campaigns */}
+            {/* Archived Campaigns — collapsed by default to declutter; the
+                expand/collapse choice persists per-browser. */}
             {groupedCampaigns.archived.length > 0 && (
-              <div className="space-y-4">
-                <h2 className="text-lg font-medium text-muted-foreground">Archived Campaigns</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {groupedCampaigns.archived.map((campaign) => (
-                    <CampaignCard key={campaign.id} campaign={campaign} onUpdate={handleRefresh} />
-                  ))}
-                </div>
-              </div>
+              <Collapsible open={!archivedCollapsed} onOpenChange={handleArchivedOpenChange} className="space-y-4">
+                <CollapsibleTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex items-center gap-2 text-lg font-medium text-muted-foreground hover:text-foreground"
+                    data-testid="toggle-archived-section"
+                  >
+                    {archivedCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                    <span>Archived Campaigns ({groupedCampaigns.archived.length})</span>
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {groupedCampaigns.archived.map((campaign) => (
+                      <CampaignCard key={campaign.id} campaign={campaign} onUpdate={handleRefresh} />
+                    ))}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
             )}
 
             {/* Empty state */}
