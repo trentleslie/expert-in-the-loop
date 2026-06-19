@@ -18,15 +18,21 @@ declare module "http" {
 // Clerk FAPI proxy and middleware MUST be mounted before body parsers
 setupAuth(app);
 
+// The campaign-pairs import wizard POSTs the mapped pairs as a JSON body
+// (`{ pairs: [...] }`), which can exceed body-parser's 100kb default and 413s
+// ("request entity too large"). Raise the limit to comfortably fit a full campaign.
+const BODY_LIMIT = "10mb";
+
 app.use(
   express.json({
+    limit: BODY_LIMIT,
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
   }),
 );
 
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: false, limit: BODY_LIMIT }));
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {

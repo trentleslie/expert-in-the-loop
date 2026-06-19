@@ -459,6 +459,11 @@ server {
     listen 80;
     server_name _;
 
+    # Campaign-pairs import sends the mapped pairs as one JSON request; raise the
+    # body cap above nginx's 1 MB default so large campaigns don't 413 at the proxy
+    # (the app's express.json limit is set to match).
+    client_max_body_size 10m;
+
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
