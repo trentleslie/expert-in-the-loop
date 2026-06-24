@@ -191,6 +191,7 @@ export interface IStorage {
     numericScores: number[];
     numericMean: number | null;
     numericStdDev: number | null;
+    reviewerNotes: { note: string; scoreBinary: Vote["scoreBinary"]; scoreNumeric: number | null }[];
   }[]>;
   
   getDisagreementByConfidence(campaignId: string): Promise<{
@@ -1384,10 +1385,11 @@ export class DatabaseStorage implements IStorage {
     numericScores: number[];
     numericMean: number | null;
     numericStdDev: number | null;
+    reviewerNotes: { note: string; scoreBinary: Vote["scoreBinary"]; scoreNumeric: number | null }[];
   }[]> {
     const campaignPairs = await db.select().from(pairs).where(eq(pairs.campaignId, campaignId));
     const pairMap = new Map(campaignPairs.map(p => [p.id, p]));
-    
+
     const allVotes = await db
       .select()
       .from(votes)
@@ -1398,11 +1400,16 @@ export class DatabaseStorage implements IStorage {
       positiveVotes: number;
       negativeVotes: number;
       numericScores: number[];
+      // Reviewer notes are the qualitative reasoning behind a vote. We keep each
+      // note with the score it accompanied so the UI can show which "side" of a
+      // disputed pair the comment came from (e.g. a match-voter's rationale vs a
+      // no_match-voter's).
+      reviewerNotes: { note: string; scoreBinary: Vote["scoreBinary"]; scoreNumeric: number | null }[];
     }>();
-    
+
     allVotes.forEach(({ votes: v }) => {
       if (!pairStats.has(v.pairId)) {
-        pairStats.set(v.pairId, { positiveVotes: 0, negativeVotes: 0, numericScores: [] });
+        pairStats.set(v.pairId, { positiveVotes: 0, negativeVotes: 0, numericScores: [], reviewerNotes: [] });
       }
       const stats = pairStats.get(v.pairId)!;
       if (v.scoringMode === "binary") {
@@ -1411,6 +1418,10 @@ export class DatabaseStorage implements IStorage {
         // Note: "unsure" votes are not counted as positive or negative
       }
       if (v.scoreNumeric) stats.numericScores.push(v.scoreNumeric);
+      const note = v.reviewerNotes?.trim();
+      if (note) {
+        stats.reviewerNotes.push({ note, scoreBinary: v.scoreBinary, scoreNumeric: v.scoreNumeric });
+      }
     });
     
     const result = [];
@@ -1440,6 +1451,7 @@ export class DatabaseStorage implements IStorage {
         numericScores: stats.numericScores,
         numericMean,
         numericStdDev,
+        reviewerNotes: stats.reviewerNotes,
       });
     }
     
