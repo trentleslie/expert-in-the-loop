@@ -23,10 +23,14 @@ const PLACEHOLDER_CAMPAIGN_ID = "00000000-0000-0000-0000-000000000000";
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
-  const file = argv.find((a) => !a.startsWith("--"));
   const commit = argv.includes("--commit");
   const createdByIdx = argv.indexOf("--created-by");
   const createdBy = createdByIdx >= 0 ? argv[createdByIdx + 1] : undefined;
+  // The file is the first non-flag argument that is NOT the value consumed by --created-by,
+  // so flags-before-file (`--commit --created-by <id> <file>`) resolves the file correctly
+  // instead of mistaking the --created-by value for the campaign JSON path.
+  const createdByValueIdx = createdByIdx >= 0 ? createdByIdx + 1 : -1;
+  const file = argv.find((a, i) => !a.startsWith("--") && i !== createdByValueIdx);
 
   if (!file) {
     console.error("usage: tsx scripts/import-benchmark-campaign.ts <campaign.json> [--commit --created-by <userId>]");
