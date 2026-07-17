@@ -76,9 +76,21 @@ async function main(): Promise<void> {
   // Lint: the reviewer instructions should use the same words as the vote buttons. A binary campaign
   // whose instructions say "yes/no" while the buttons read "Match/No Match" confuses reviewers.
   if (effective.scoring.mode === "binary" && campaign.instructions) {
-    const instr = campaign.instructions.toLowerCase();
     const { positive, negative, neutral } = effective.scoring.binary.labels;
-    const missing = [positive, negative].filter((l) => !instr.includes(l.toLowerCase()));
+    const allLabels = [positive, negative, neutral];
+    // Substring-safe mention check: a label counts as mentioned only if it appears somewhere NOT
+    // absorbed by a longer label that contains it — e.g. "Match" inside "No Match" is not a real
+    // mention of the positive label, so remove the containing labels before testing.
+    const mentioned = (label: string): boolean => {
+      const l = label.toLowerCase();
+      let s = campaign.instructions!.toLowerCase();
+      for (const other of allLabels) {
+        const o = other.toLowerCase();
+        if (o !== l && o.includes(l)) s = s.split(o).join(" ");
+      }
+      return s.includes(l);
+    };
+    const missing = [positive, negative].filter((l) => !mentioned(l));
     if (missing.length) {
       console.warn(
         `WARNING: instructions do not mention vote-button label(s) [${missing.join(", ")}]. ` +
