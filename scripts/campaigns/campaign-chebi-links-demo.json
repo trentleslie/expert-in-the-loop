@@ -1,0 +1,696 @@
+{
+  "campaign": {
+    "name": "ChEBI identity adjudication \u2014 external-links demo (DEV)",
+    "campaignType": "metabolite-chebi-identity-adjudication",
+    "description": "DEV demo of the external-link + config-at-import feature: two candidate ChEBI identifiers per metabolite name, blinded + randomized, each clickable through to its ChEBI entry.",
+    "instructions": "For each metabolite name, choose Match if the shown ChEBI identifier is the correct identity, No Match if it is not, or Unsure. Across a name's two candidate ChEBI identifiers, the expected outcome is one Match and one No Match.",
+    "config": {
+      "scoring": {
+        "mode": "binary",
+        "binary": {
+          "labels": {
+            "positive": "Match",
+            "negative": "No Match",
+            "neutral": "Unsure"
+          }
+        }
+      },
+      "consensus": {
+        "minVotes": 2,
+        "confirmPct": 70,
+        "rejectPct": 70
+      },
+      "display": {
+        "showExternalLinks": true,
+        "linkTemplate": "https://www.ebi.ac.uk/chebi/searchId.do?chebiId={targetId}",
+        "showAlternatives": false,
+        "showMetadataPanel": true
+      },
+      "import": {
+        "sourcePrefixFilter": false
+      }
+    }
+  },
+  "pairs": [
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "Propionylcarnitine  ( C3 )",
+      "sourceId": "inputs_1539353822.xlsx:C3",
+      "sourceDataset": "inputs_1539353822.xlsx",
+      "targetText": "CHEBI:28867",
+      "targetId": "CHEBI:28867",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "UFAHZIUFPNSHSL-MRVPVSSYSA-N",
+          "UFAHZIUFPNSHSL-UHFFFAOYSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "Propionylcarnitine  ( C3 )",
+      "sourceId": "inputs_1539353822.xlsx:C3",
+      "sourceDataset": "inputs_1539353822.xlsx",
+      "targetText": "CHEBI:53210",
+      "targetId": "CHEBI:53210",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "UFAHZIUFPNSHSL-MRVPVSSYSA-N",
+          "UFAHZIUFPNSHSL-UHFFFAOYSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "3-hydroxymyristate",
+      "sourceId": "inputs_1555609921.xlsx:3-HYDROXYMYRISTATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:42539",
+      "targetId": "CHEBI:42539",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "ATRNZOYKSNPPBF-CYBMUJFWSA-N",
+          "ATRNZOYKSNPPBF-UHFFFAOYSA-N",
+          "ATRNZOYKSNPPBF-ZDUSSCGKSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "3-hydroxymyristate",
+      "sourceId": "inputs_1555609921.xlsx:3-HYDROXYMYRISTATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:37374",
+      "targetId": "CHEBI:37374",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "ATRNZOYKSNPPBF-CYBMUJFWSA-N",
+          "ATRNZOYKSNPPBF-UHFFFAOYSA-N",
+          "ATRNZOYKSNPPBF-ZDUSSCGKSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "1-linoleoylglycerol (18:2)",
+      "sourceId": "inputs_1555609921.xlsx:1-LINOLEOYLGLYCEROL(18:2)",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:75561",
+      "targetId": "CHEBI:75561",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "WECGLUPZRHILCT-GSNKCQISSA-N",
+          "WECGLUPZRHILCT-HZJYTTRNSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "1-linoleoylglycerol (18:2)",
+      "sourceId": "inputs_1555609921.xlsx:1-LINOLEOYLGLYCEROL(18:2)",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:75568",
+      "targetId": "CHEBI:75568",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "WECGLUPZRHILCT-GSNKCQISSA-N",
+          "WECGLUPZRHILCT-HZJYTTRNSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "androsterone sulfate",
+      "sourceId": "inputs_1555609921.xlsx:ANDROSTERONESULFATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:83037",
+      "targetId": "CHEBI:83037",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "CZWCKYRVOZZJNM-USOAJAOKSA-N",
+          "ZMITXKRGXGRMKS-HLUDHZFRSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "androsterone sulfate",
+      "sourceId": "inputs_1555609921.xlsx:ANDROSTERONESULFATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:16814",
+      "targetId": "CHEBI:16814",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "CZWCKYRVOZZJNM-USOAJAOKSA-N",
+          "ZMITXKRGXGRMKS-HLUDHZFRSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "androsterone sulfate",
+      "sourceId": "inputs_1539354673.xlsx:M31591",
+      "sourceDataset": "inputs_1539354673.xlsx",
+      "targetText": "CHEBI:83037",
+      "targetId": "CHEBI:83037",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "CZWCKYRVOZZJNM-USOAJAOKSA-N",
+          "ZMITXKRGXGRMKS-HLUDHZFRSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "androsterone sulfate",
+      "sourceId": "inputs_1539354673.xlsx:M31591",
+      "sourceDataset": "inputs_1539354673.xlsx",
+      "targetText": "CHEBI:16814",
+      "targetId": "CHEBI:16814",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "CZWCKYRVOZZJNM-USOAJAOKSA-N",
+          "ZMITXKRGXGRMKS-HLUDHZFRSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "mannitol/sorbitol",
+      "sourceId": "inputs_1555609921.xlsx:MANNITOL/SORBITOL",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:29864",
+      "targetId": "CHEBI:29864",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "FBPFZTCFMRRESA-KVTDHHQDSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "mannitol/sorbitol",
+      "sourceId": "inputs_1555609921.xlsx:MANNITOL/SORBITOL",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:16899",
+      "targetId": "CHEBI:16899",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "FBPFZTCFMRRESA-KVTDHHQDSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "andro steroid monosulfate (1)*",
+      "sourceId": "inputs_1555609921.xlsx:ANDROSTEROIDMONOSULFATE(1)",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:16814",
+      "targetId": "CHEBI:16814",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "CZWCKYRVOZZJNM-USOAJAOKSA-N",
+          "ZMITXKRGXGRMKS-HLUDHZFRSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "andro steroid monosulfate (1)*",
+      "sourceId": "inputs_1555609921.xlsx:ANDROSTEROIDMONOSULFATE(1)",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:83037",
+      "targetId": "CHEBI:83037",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "CZWCKYRVOZZJNM-USOAJAOKSA-N",
+          "ZMITXKRGXGRMKS-HLUDHZFRSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "quinine",
+      "sourceId": "inputs_1555609921.xlsx:QUININE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:182417",
+      "targetId": "CHEBI:182417",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "AKYHKWQPZHDOBW-DSXUQNDKSA-N",
+          "AKYHKWQPZHDOBW-DYJTUPHZSA-N",
+          "AKYHKWQPZHDOBW-QMJAHCIASA-N",
+          "AKYHKWQPZHDOBW-UHFFFAOYSA-N",
+          "AKYHKWQPZHDOBW-VJAUXQICSA-N",
+          "AKYHKWQPZHDOBW-YWJGYEEHSA-N",
+          "AKYHKWQPZHDOBW-YYQSSQEESA-N",
+          "KUTGSSTVCUKONV-JWVVETNKSA-N",
+          "LOUPRKONTZGTKE-FOEVPDMQSA-N",
+          "LOUPRKONTZGTKE-LHHVKLHASA-N",
+          "LOUPRKONTZGTKE-NBGVHYBESA-N",
+          "LOUPRKONTZGTKE-RYMBOPBQSA-N",
+          "LOUPRKONTZGTKE-UYVJDWJCSA-N",
+          "LOUPRKONTZGTKE-VOMFEXJBSA-N",
+          "LOUPRKONTZGTKE-WZBLMQSHSA-N",
+          "RONWGALEIBILOG-CPCHKEEBSA-N",
+          "RONWGALEIBILOG-MDSABZTASA-N",
+          "RONWGALEIBILOG-PLYVKUMQSA-N",
+          "RONWGALEIBILOG-QJEGDNEGSA-N",
+          "RONWGALEIBILOG-UMFZPAAKSA-N",
+          "RONWGALEIBILOG-VCSAERELSA-N",
+          "RONWGALEIBILOG-VMJVVOMYSA-N",
+          "RONWGALEIBILOG-XISHNXTCSA-N",
+          "XHKUDCCTVQUHJQ-LCYSNFERSA-N",
+          "XHKUDCCTVQUHJQ-RNVKORQYSA-N",
+          "XNKHSSWUPYVJLY-LRXYSQQVSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "quinine",
+      "sourceId": "inputs_1555609921.xlsx:QUININE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:15854",
+      "targetId": "CHEBI:15854",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "AKYHKWQPZHDOBW-DSXUQNDKSA-N",
+          "AKYHKWQPZHDOBW-DYJTUPHZSA-N",
+          "AKYHKWQPZHDOBW-QMJAHCIASA-N",
+          "AKYHKWQPZHDOBW-UHFFFAOYSA-N",
+          "AKYHKWQPZHDOBW-VJAUXQICSA-N",
+          "AKYHKWQPZHDOBW-YWJGYEEHSA-N",
+          "AKYHKWQPZHDOBW-YYQSSQEESA-N",
+          "KUTGSSTVCUKONV-JWVVETNKSA-N",
+          "LOUPRKONTZGTKE-FOEVPDMQSA-N",
+          "LOUPRKONTZGTKE-LHHVKLHASA-N",
+          "LOUPRKONTZGTKE-NBGVHYBESA-N",
+          "LOUPRKONTZGTKE-RYMBOPBQSA-N",
+          "LOUPRKONTZGTKE-UYVJDWJCSA-N",
+          "LOUPRKONTZGTKE-VOMFEXJBSA-N",
+          "LOUPRKONTZGTKE-WZBLMQSHSA-N",
+          "RONWGALEIBILOG-CPCHKEEBSA-N",
+          "RONWGALEIBILOG-MDSABZTASA-N",
+          "RONWGALEIBILOG-PLYVKUMQSA-N",
+          "RONWGALEIBILOG-QJEGDNEGSA-N",
+          "RONWGALEIBILOG-UMFZPAAKSA-N",
+          "RONWGALEIBILOG-VCSAERELSA-N",
+          "RONWGALEIBILOG-VMJVVOMYSA-N",
+          "RONWGALEIBILOG-XISHNXTCSA-N",
+          "XHKUDCCTVQUHJQ-LCYSNFERSA-N",
+          "XHKUDCCTVQUHJQ-RNVKORQYSA-N",
+          "XNKHSSWUPYVJLY-LRXYSQQVSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "paroxetine",
+      "sourceId": "inputs_1555609921.xlsx:PAROXETINE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:7944",
+      "targetId": "CHEBI:7944",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "AHOUBRCZNHFOSL-YOEHRIQHSA-N",
+          "GELRVIPPMNMYGS-RVXRQPKJSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "paroxetine",
+      "sourceId": "inputs_1555609921.xlsx:PAROXETINE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:7936",
+      "targetId": "CHEBI:7936",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "AHOUBRCZNHFOSL-YOEHRIQHSA-N",
+          "GELRVIPPMNMYGS-RVXRQPKJSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "2-hydroxydecanoate",
+      "sourceId": "inputs_1555609921.xlsx:2-HYDROXYDECANOATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:179163",
+      "targetId": "CHEBI:179163",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "GHPVDCPCKSNJDR-UHFFFAOYSA-N",
+          "GHPVDCPCKSNJDR-VIFPVBQESA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "2-hydroxydecanoate",
+      "sourceId": "inputs_1555609921.xlsx:2-HYDROXYDECANOATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:133172",
+      "targetId": "CHEBI:133172",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "GHPVDCPCKSNJDR-UHFFFAOYSA-N",
+          "GHPVDCPCKSNJDR-VIFPVBQESA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "2-aminoheptanoate",
+      "sourceId": "inputs_1555609921.xlsx:2-AMINOHEPTANOATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:40682",
+      "targetId": "CHEBI:40682",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "RDFMDVXONNIGBC-LURJTMIESA-N",
+          "RDFMDVXONNIGBC-UHFFFAOYSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "2-aminoheptanoate",
+      "sourceId": "inputs_1555609921.xlsx:2-AMINOHEPTANOATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:133223",
+      "targetId": "CHEBI:133223",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "RDFMDVXONNIGBC-LURJTMIESA-N",
+          "RDFMDVXONNIGBC-UHFFFAOYSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "2-aminoheptanoic acid",
+      "sourceId": "inputs_1539354673.xlsx:M33163",
+      "sourceDataset": "inputs_1539354673.xlsx",
+      "targetText": "CHEBI:133223",
+      "targetId": "CHEBI:133223",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "RDFMDVXONNIGBC-LURJTMIESA-N",
+          "RDFMDVXONNIGBC-UHFFFAOYSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "2-aminoheptanoic acid",
+      "sourceId": "inputs_1539354673.xlsx:M33163",
+      "sourceDataset": "inputs_1539354673.xlsx",
+      "targetText": "CHEBI:40682",
+      "targetId": "CHEBI:40682",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "RDFMDVXONNIGBC-LURJTMIESA-N",
+          "RDFMDVXONNIGBC-UHFFFAOYSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "3-methylglutarylcarnitine (2)",
+      "sourceId": "inputs_1555609921.xlsx:3-METHYLGLUTARYLCARNITINE(2)",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:231583",
+      "targetId": "CHEBI:231583",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "HFCPFJNSBPQJDP-NXEZZACHSA-N",
+          "HFCPFJNSBPQJDP-NXEZZACHSA-O",
+          "HFCPFJNSBPQJDP-UHFFFAOYSA-N",
+          "HFCPFJNSBPQJDP-UHFFFAOYSA-O"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "3-methylglutarylcarnitine (2)",
+      "sourceId": "inputs_1555609921.xlsx:3-METHYLGLUTARYLCARNITINE(2)",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:70857",
+      "targetId": "CHEBI:70857",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "HFCPFJNSBPQJDP-NXEZZACHSA-N",
+          "HFCPFJNSBPQJDP-NXEZZACHSA-O",
+          "HFCPFJNSBPQJDP-UHFFFAOYSA-N",
+          "HFCPFJNSBPQJDP-UHFFFAOYSA-O"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "4-vinylguaiacol sulfate",
+      "sourceId": "inputs_1555609921.xlsx:4-VINYLGUAIACOLSULFATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:133546",
+      "targetId": "CHEBI:133546",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "FKCHAXAGQVCJPN-UHFFFAOYSA-M",
+          "FKCHAXAGQVCJPN-UHFFFAOYSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "4-vinylguaiacol sulfate",
+      "sourceId": "inputs_1555609921.xlsx:4-VINYLGUAIACOLSULFATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:133544",
+      "targetId": "CHEBI:133544",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "FKCHAXAGQVCJPN-UHFFFAOYSA-M",
+          "FKCHAXAGQVCJPN-UHFFFAOYSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "2-hydroxybutyrate/2-hydroxyisobutyrate",
+      "sourceId": "inputs_1555609921.xlsx:2-HYDROXYBUTYRATE/2-HYDROXYISOBUTYRATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:50613",
+      "targetId": "CHEBI:50613",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "AFENDNXGAFYKQO-UHFFFAOYSA-N",
+          "AFENDNXGAFYKQO-VKHMYHEASA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "2-hydroxybutyrate/2-hydroxyisobutyrate",
+      "sourceId": "inputs_1555609921.xlsx:2-HYDROXYBUTYRATE/2-HYDROXYISOBUTYRATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:1148",
+      "targetId": "CHEBI:1148",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "AFENDNXGAFYKQO-UHFFFAOYSA-N",
+          "AFENDNXGAFYKQO-VKHMYHEASA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "oleate/vaccenate (18:1)",
+      "sourceId": "inputs_1555609921.xlsx:OLEATE/VACCENATE(18:1)",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:27997",
+      "targetId": "CHEBI:27997",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "BCKXLBQYZLBQEK-KVVVOXFISA-M",
+          "ZQPPMHVWECSIRJ-JEGJVYCWSA-N",
+          "ZQPPMHVWECSIRJ-KTKRTIGZSA-N",
+          "ZQPPMHVWECSIRJ-MDZDMXLPSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "oleate/vaccenate (18:1)",
+      "sourceId": "inputs_1555609921.xlsx:OLEATE/VACCENATE(18:1)",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:16196",
+      "targetId": "CHEBI:16196",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "BCKXLBQYZLBQEK-KVVVOXFISA-M",
+          "ZQPPMHVWECSIRJ-JEGJVYCWSA-N",
+          "ZQPPMHVWECSIRJ-KTKRTIGZSA-N",
+          "ZQPPMHVWECSIRJ-MDZDMXLPSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "2-hydroxystearate",
+      "sourceId": "inputs_1555609921.xlsx:2-HYDROXYSTEARATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:15913",
+      "targetId": "CHEBI:15913",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "KIHBGTRZFAVZRV-KRWDZBQOSA-N",
+          "KIHBGTRZFAVZRV-QGZVFWFLSA-N",
+          "KIHBGTRZFAVZRV-UHFFFAOYSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "2-hydroxystearate",
+      "sourceId": "inputs_1555609921.xlsx:2-HYDROXYSTEARATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:18129",
+      "targetId": "CHEBI:18129",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "KIHBGTRZFAVZRV-KRWDZBQOSA-N",
+          "KIHBGTRZFAVZRV-QGZVFWFLSA-N",
+          "KIHBGTRZFAVZRV-UHFFFAOYSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "2-hydroxystearate",
+      "sourceId": "inputs_1539354673.xlsx:M17945",
+      "sourceDataset": "inputs_1539354673.xlsx",
+      "targetText": "CHEBI:18129",
+      "targetId": "CHEBI:18129",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "KIHBGTRZFAVZRV-KRWDZBQOSA-N",
+          "KIHBGTRZFAVZRV-QGZVFWFLSA-N",
+          "KIHBGTRZFAVZRV-UHFFFAOYSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "2-hydroxystearate",
+      "sourceId": "inputs_1539354673.xlsx:M17945",
+      "sourceDataset": "inputs_1539354673.xlsx",
+      "targetText": "CHEBI:15913",
+      "targetId": "CHEBI:15913",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "KIHBGTRZFAVZRV-KRWDZBQOSA-N",
+          "KIHBGTRZFAVZRV-QGZVFWFLSA-N",
+          "KIHBGTRZFAVZRV-UHFFFAOYSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "fluoxetine",
+      "sourceId": "inputs_1555609921.xlsx:FLUOXETINE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:5118",
+      "targetId": "CHEBI:5118",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "GIYXAJPCNFJEHY-UHFFFAOYSA-N",
+          "RTHCYVBBDHJXIQ-UHFFFAOYSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "fluoxetine",
+      "sourceId": "inputs_1555609921.xlsx:FLUOXETINE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:145458",
+      "targetId": "CHEBI:145458",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "GIYXAJPCNFJEHY-UHFFFAOYSA-N",
+          "RTHCYVBBDHJXIQ-UHFFFAOYSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "citramalate",
+      "sourceId": "inputs_1555609921.xlsx:CITRAMALATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:29003",
+      "targetId": "CHEBI:29003",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "XFTRTWQBIOMVPK-UHFFFAOYSA-N",
+          "XFTRTWQBIOMVPK-YFKPBYRVSA-N"
+        ]
+      }
+    },
+    {
+      "pairType": "metabolite-chebi-identity-adjudication",
+      "sourceText": "citramalate",
+      "sourceId": "inputs_1555609921.xlsx:CITRAMALATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:15584",
+      "targetId": "CHEBI:15584",
+      "targetDataset": "ChEBI",
+      "targetMetadata": {
+        "inchikeys": [
+          "XFTRTWQBIOMVPK-UHFFFAOYSA-N",
+          "XFTRTWQBIOMVPK-YFKPBYRVSA-N"
+        ]
+      }
+    }
+  ]
+}

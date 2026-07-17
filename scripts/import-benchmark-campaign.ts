@@ -18,6 +18,7 @@
  */
 import { readFileSync } from "node:fs";
 import { insertCampaignSchema, insertPairSchema } from "@shared/schema";
+import { campaignConfigSchema, DEFAULT_CAMPAIGN_CONFIG } from "@shared/campaignConfig";
 
 const PLACEHOLDER_CAMPAIGN_ID = "00000000-0000-0000-0000-000000000000";
 
@@ -38,7 +39,7 @@ async function main(): Promise<void> {
   }
 
   const spec = JSON.parse(readFileSync(file, "utf8")) as {
-    campaign: { name: string; campaignType: string; description?: string; instructions?: string };
+    campaign: { name: string; campaignType: string; description?: string; instructions?: string; config?: unknown };
     pairs: Array<Record<string, unknown>>;
   };
   const { campaign, pairs } = spec;
@@ -67,6 +68,29 @@ async function main(): Promise<void> {
   }
   console.log(`All ${pairs.length} pairs pass insertPairSchema.`);
 
+  // Optional campaign config (vote-button labels, external links, consensus). Validated against the
+  // app's own schema; null -> the app falls back to DEFAULT_CAMPAIGN_CONFIG.
+  const cfg = campaign.config ? campaignConfigSchema.parse(campaign.config) : null;
+  const effective = cfg ?? DEFAULT_CAMPAIGN_CONFIG;
+
+  // Lint: the reviewer instructions should use the same words as the vote buttons. A binary campaign
+  // whose instructions say "yes/no" while the buttons read "Match/No Match" confuses reviewers.
+  if (effective.scoring.mode === "binary" && campaign.instructions) {
+    const instr = campaign.instructions.toLowerCase();
+    const { positive, negative, neutral } = effective.scoring.binary.labels;
+    const missing = [positive, negative].filter((l) => !instr.includes(l.toLowerCase()));
+    if (missing.length) {
+      console.warn(
+        `WARNING: instructions do not mention vote-button label(s) [${missing.join(", ")}]. ` +
+          `The review buttons will read "${positive}" / "${negative}" / "${neutral}" — ` +
+          `align the instructions with the buttons before activating the campaign.`,
+      );
+    }
+  }
+  if (effective.display.showExternalLinks) {
+    console.log(`External links: ON — ${effective.display.linkTemplate}`);
+  }
+
   if (!commit) {
     console.log("\nDRY RUN — no database connection opened, nothing written.");
     console.log("Re-run with `--commit --created-by <userId>` to insert.");
@@ -88,7 +112,7 @@ async function main(): Promise<void> {
     description: campaign.description ?? null,
     instructions: campaign.instructions ?? null,
     createdBy,
-    config: null, // null -> getCampaignConfig() falls back to DEFAULT_CAMPAIGN_CONFIG; tune in the UI
+    config: cfg, // validated CampaignConfig from the JSON, or null -> app default (tune in the UI)
     status: "draft", // created inactive; an admin activates it after review
   });
   const created = await storage.createCampaign(campaignInsert);

@@ -3,7 +3,7 @@
     "name": "metLinkR structure-vs-curator-link adjudication (DEV prototype)",
     "campaignType": "metabolite-identity-adjudication",
     "description": "EITL Portfolio Campaign #4 (dev prototype). Adjudicate the correct metabolite identity where the COMETS curator link and BioMapper's structural resolution disagree; candidates blinded (origin not shown), randomized order. NOTE: dev prototype over a representative 24-case subset \u2014 the launch pool requires structural-concordance filtering (~101 discordant + 16 needs-verification).",
-    "instructions": "For each metabolite name, decide independently whether the shown candidate identifier is the correct identity. One YES + one NO across the two candidates is the expected outcome."
+    "instructions": "For each metabolite name, choose Match if the shown candidate identifier is the correct identity, No Match if it is not, or Unsure. Across a name's two candidates, the expected outcome is one Match and one No Match."
   },
   "pairs": [
     {
