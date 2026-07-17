@@ -1,0 +1,586 @@
+{
+  "campaign": {
+    "name": "metLinkR structure-vs-curator-link adjudication (DEV prototype)",
+    "campaignType": "metabolite-identity-adjudication",
+    "description": "EITL Portfolio Campaign #4 (dev prototype). Adjudicate the correct metabolite identity where the COMETS curator link and BioMapper's structural resolution disagree; candidates blinded (origin not shown), randomized order. NOTE: dev prototype over a representative 24-case subset \u2014 the launch pool requires structural-concordance filtering (~101 discordant + 16 needs-verification).",
+    "instructions": "For each metabolite name, decide independently whether the shown candidate identifier is the correct identity. One YES + one NO across the two candidates is the expected outcome."
+  },
+  "pairs": [
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "3-hydroxymyristate",
+      "sourceId": "inputs_1555609921.xlsx:3-HYDROXYMYRISTATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:85148",
+      "targetId": "CHEBI:85148",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['1961-72-4', '28715-21-1', '3422-31-9', '35683-15-9', '631-127-5'], 'CHEBI': ['37374', '42539', '85148'], 'CHEMBL.COMPOUND': ['CHEMBL1232858', 'CHEMBL4456892'], 'DRUGBANK': ['DB02767'], 'HMDB': ['HMDB0010731', 'HMDB0061656'], 'INCHIKEY': ['ATRNZOYKSNPPBF-CYBMUJFWSA-N', 'ATRNZOYKSNPPBF-UHFFFAOYSA-N', 'ATRNZOYKSNPPBF-ZDUSSCGKSA-N'], 'LM': ['FA01050175', 'FA01050322', 'FA01050323'], 'MESH': "
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "3-hydroxymyristate",
+      "sourceId": "inputs_1555609921.xlsx:3-HYDROXYMYRISTATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "16064",
+      "targetId": "16064",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['1961-72-4', '28715-21-1', '3422-31-9', '35683-15-9', '631-127-5'], 'CHEBI': ['37374', '42539', '85148'], 'CHEMBL.COMPOUND': ['CHEMBL1232858', 'CHEMBL4456892'], 'DRUGBANK': ['DB02767'], 'HMDB': ['HMDB0010731', 'HMDB0061656'], 'INCHIKEY': ['ATRNZOYKSNPPBF-CYBMUJFWSA-N', 'ATRNZOYKSNPPBF-UHFFFAOYSA-N', 'ATRNZOYKSNPPBF-ZDUSSCGKSA-N'], 'LM': ['FA01050175', 'FA01050322', 'FA01050323'], 'MESH': "
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "1-linoleoylglycerol (18:2)",
+      "sourceId": "inputs_1555609921.xlsx:1-LINOLEOYLGLYCEROL(18:2)",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:75561",
+      "targetId": "CHEBI:75561",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['67968-46-1'], 'CHEBI': ['75561', '75568'], 'CHEMBL.COMPOUND': ['CHEMBL188361', 'CHEMBL458250'], 'HMDB': ['HMDB0011568', 'HMDB0242115'], 'INCHIKEY': ['WECGLUPZRHILCT-GSNKCQISSA-N', 'WECGLUPZRHILCT-HZJYTTRNSA-N'], 'LM': ['GL01010006'], 'MESH': ['C048627'], 'PUBCHEM.COMPOUND': ['5283469', '6436630'], 'PathWhiz.Compound': ['7164'], 'RM': ['0134398'], 'RXCUI': ['1368193'], 'RXNORM': ['1368193"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "1-linoleoylglycerol (18:2)",
+      "sourceId": "inputs_1555609921.xlsx:1-LINOLEOYLGLYCEROL(18:2)",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "5283469",
+      "targetId": "5283469",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['67968-46-1'], 'CHEBI': ['75561', '75568'], 'CHEMBL.COMPOUND': ['CHEMBL188361', 'CHEMBL458250'], 'HMDB': ['HMDB0011568', 'HMDB0242115'], 'INCHIKEY': ['WECGLUPZRHILCT-GSNKCQISSA-N', 'WECGLUPZRHILCT-HZJYTTRNSA-N'], 'LM': ['GL01010006'], 'MESH': ['C048627'], 'PUBCHEM.COMPOUND': ['5283469', '6436630'], 'PathWhiz.Compound': ['7164'], 'RM': ['0134398'], 'RXCUI': ['1368193'], 'RXNORM': ['1368193"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "androsterone sulfate",
+      "sourceId": "inputs_1555609921.xlsx:ANDROSTERONESULFATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "159663",
+      "targetId": "159663",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['2479-86-9', '651-48-9'], 'CHEBI': ['16814', '83037'], 'CHEMBL.COMPOUND': ['CHEMBL2074598', 'CHEMBL259898'], 'DRUGBANK': ['DB05804'], 'DrugCentral': ['4049'], 'GTOPDB': ['4528'], 'HMDB': ['HMDB0001032', 'HMDB0002759'], 'INCHIKEY': ['CZWCKYRVOZZJNM-USOAJAOKSA-N', 'ZMITXKRGXGRMKS-HLUDHZFRSA-N'], 'KEGG.COMPOUND': ['C04555'], 'LM': ['ST05020001', 'ST05020010'], 'LOINC': ['LP15527-2'], 'MESH':"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "androsterone sulfate",
+      "sourceId": "inputs_1555609921.xlsx:ANDROSTERONESULFATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:16814",
+      "targetId": "CHEBI:16814",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['2479-86-9', '651-48-9'], 'CHEBI': ['16814', '83037'], 'CHEMBL.COMPOUND': ['CHEMBL2074598', 'CHEMBL259898'], 'DRUGBANK': ['DB05804'], 'DrugCentral': ['4049'], 'GTOPDB': ['4528'], 'HMDB': ['HMDB0001032', 'HMDB0002759'], 'INCHIKEY': ['CZWCKYRVOZZJNM-USOAJAOKSA-N', 'ZMITXKRGXGRMKS-HLUDHZFRSA-N'], 'KEGG.COMPOUND': ['C04555'], 'LM': ['ST05020001', 'ST05020010'], 'LOINC': ['LP15527-2'], 'MESH':"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "androsterone sulfate",
+      "sourceId": "inputs_1539354673.xlsx:M31591",
+      "sourceDataset": "inputs_1539354673.xlsx",
+      "targetText": "CHEBI:16814",
+      "targetId": "CHEBI:16814",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['2479-86-9', '651-48-9'], 'CHEBI': ['16814', '83037'], 'CHEMBL.COMPOUND': ['CHEMBL2074598', 'CHEMBL259898'], 'DRUGBANK': ['DB05804'], 'DrugCentral': ['4049'], 'GTOPDB': ['4528'], 'HMDB': ['HMDB0001032', 'HMDB0002759'], 'INCHIKEY': ['CZWCKYRVOZZJNM-USOAJAOKSA-N', 'ZMITXKRGXGRMKS-HLUDHZFRSA-N'], 'KEGG.COMPOUND': ['C04555'], 'LM': ['ST05020001', 'ST05020010'], 'LOINC': ['LP15527-2'], 'MESH':"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "androsterone sulfate",
+      "sourceId": "inputs_1539354673.xlsx:M31591",
+      "sourceDataset": "inputs_1539354673.xlsx",
+      "targetText": "HMDB02759",
+      "targetId": "HMDB02759",
+      "targetDataset": "HMDB",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['2479-86-9', '651-48-9'], 'CHEBI': ['16814', '83037'], 'CHEMBL.COMPOUND': ['CHEMBL2074598', 'CHEMBL259898'], 'DRUGBANK': ['DB05804'], 'DrugCentral': ['4049'], 'GTOPDB': ['4528'], 'HMDB': ['HMDB0001032', 'HMDB0002759'], 'INCHIKEY': ['CZWCKYRVOZZJNM-USOAJAOKSA-N', 'ZMITXKRGXGRMKS-HLUDHZFRSA-N'], 'KEGG.COMPOUND': ['C04555'], 'LM': ['ST05020001', 'ST05020010'], 'LOINC': ['LP15527-2'], 'MESH':"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "N-acetylthreonine",
+      "sourceId": "inputs_1555609921.xlsx:N-ACETYLTHREONINE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:45826",
+      "targetId": "CHEBI:45826",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['109-174-3', '17093-74-2'], 'CHEBI': ['45826'], 'HMDB': ['HMDB0062557'], 'INCHIKEY': ['PEDXUVCGOLSNLQ-WUJLRWPWSA-N'], 'MESH': ['C063269'], 'PUBCHEM.COMPOUND': ['152204'], 'RM': ['0139149'], 'UNII': ['V0E98V3R9O']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "N-acetylthreonine",
+      "sourceId": "inputs_1555609921.xlsx:N-ACETYLTHREONINE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "152204",
+      "targetId": "152204",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['109-174-3', '17093-74-2'], 'CHEBI': ['45826'], 'HMDB': ['HMDB0062557'], 'INCHIKEY': ['PEDXUVCGOLSNLQ-WUJLRWPWSA-N'], 'MESH': ['C063269'], 'PUBCHEM.COMPOUND': ['152204'], 'RM': ['0139149'], 'UNII': ['V0E98V3R9O']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "metoprolol acid metabolite*",
+      "sourceId": "inputs_1555609921.xlsx:METOPROLOLACIDMETABOLITE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:48887",
+      "targetId": "CHEBI:48887",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CHEBI': ['48887']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "metoprolol acid metabolite*",
+      "sourceId": "inputs_1555609921.xlsx:METOPROLOLACIDMETABOLITE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "62936",
+      "targetId": "62936",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CHEBI': ['48887']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "pyroglutamine*",
+      "sourceId": "inputs_1555609921.xlsx:PYROGLUTAMINE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:133469",
+      "targetId": "CHEBI:133469",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['2353-44-8'], 'CHEBI': ['133469'], 'HMDB': ['HMDB0242134'], 'INCHIKEY': ['NPWMTBZSRRLQNJ-UHFFFAOYSA-N'], 'PUBCHEM.COMPOUND': ['134508'], 'RM': ['0048167']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "pyroglutamine*",
+      "sourceId": "inputs_1555609921.xlsx:PYROGLUTAMINE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "134508",
+      "targetId": "134508",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['2353-44-8'], 'CHEBI': ['133469'], 'HMDB': ['HMDB0242134'], 'INCHIKEY': ['NPWMTBZSRRLQNJ-UHFFFAOYSA-N'], 'PUBCHEM.COMPOUND': ['134508'], 'RM': ['0048167']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "1-dihomo-linoleoyl-GPC (20:2)*",
+      "sourceId": "inputs_1539354673.xlsx:M33871",
+      "sourceDataset": "inputs_1539354673.xlsx",
+      "targetText": "CHEBI:88670",
+      "targetId": "CHEBI:88670",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CHEBI': ['88670'], 'INCHIKEY': ['LNAVIIOBBICBIS-NBRVCOCJSA-M', 'LNAVIIOBBICBIS-NBRVCOCJSA-N'], 'PUBCHEM.COMPOUND': ['11483665', '124202086']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "1-dihomo-linoleoyl-GPC (20:2)*",
+      "sourceId": "inputs_1539354673.xlsx:M33871",
+      "sourceDataset": "inputs_1539354673.xlsx",
+      "targetText": "HMDB10392",
+      "targetId": "HMDB10392",
+      "targetDataset": "HMDB",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CHEBI': ['88670'], 'INCHIKEY': ['LNAVIIOBBICBIS-NBRVCOCJSA-M', 'LNAVIIOBBICBIS-NBRVCOCJSA-N'], 'PUBCHEM.COMPOUND': ['11483665', '124202086']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "mannitol/sorbitol",
+      "sourceId": "inputs_1555609921.xlsx:MANNITOL/SORBITOL",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "5780",
+      "targetId": "5780",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'ATC': ['A06AD16', 'B05BC01', 'B05CX04', 'R05CB16', 'V04CX04'], 'CAS': ['133-43-7', '201-770-2', '69-65-8', '85085-15-0'], 'CHEBI': ['16899', '29864'], 'CHEMBL.COMPOUND': ['CHEMBL4851355', 'CHEMBL689'], 'CHV': ['0000007731'], 'DRUGBANK': ['DB00742'], 'DrugCentral': ['935'], 'HMDB': ['HMDB0000765'], 'INCHIKEY': ['FBPFZTCFMRRESA-KVTDHHQDSA-N'], 'KEGG.COMPOUND': ['C00392'], 'KEGG.DRUG': ['D00062'], "
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "mannitol/sorbitol",
+      "sourceId": "inputs_1555609921.xlsx:MANNITOL/SORBITOL",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:16899",
+      "targetId": "CHEBI:16899",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'ATC': ['A06AD16', 'B05BC01', 'B05CX04', 'R05CB16', 'V04CX04'], 'CAS': ['133-43-7', '201-770-2', '69-65-8', '85085-15-0'], 'CHEBI': ['16899', '29864'], 'CHEMBL.COMPOUND': ['CHEMBL4851355', 'CHEMBL689'], 'CHV': ['0000007731'], 'DRUGBANK': ['DB00742'], 'DrugCentral': ['935'], 'HMDB': ['HMDB0000765'], 'INCHIKEY': ['FBPFZTCFMRRESA-KVTDHHQDSA-N'], 'KEGG.COMPOUND': ['C00392'], 'KEGG.DRUG': ['D00062'], "
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "desmethylnaproxen sulfate",
+      "sourceId": "inputs_1555609921.xlsx:DESMETHYLNAPROXENSULFATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:133458",
+      "targetId": "CHEBI:133458",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['106573-76-6', '69391-09-9'], 'CHEBI': ['133458'], 'HMDB': ['HMDB0242129'], 'INCHIKEY': ['BNKMSCMOWGCUOF-QMMMGPOBSA-N'], 'PUBCHEM.COMPOUND': ['184679'], 'RM': ['0188073']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "desmethylnaproxen sulfate",
+      "sourceId": "inputs_1555609921.xlsx:DESMETHYLNAPROXENSULFATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "184679",
+      "targetId": "184679",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['106573-76-6', '69391-09-9'], 'CHEBI': ['133458'], 'HMDB': ['HMDB0242129'], 'INCHIKEY': ['BNKMSCMOWGCUOF-QMMMGPOBSA-N'], 'PUBCHEM.COMPOUND': ['184679'], 'RM': ['0188073']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "o-cresol sulfate",
+      "sourceId": "inputs_1555609921.xlsx:O-CRESOLSULFATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:133089",
+      "targetId": "CHEBI:133089",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['26590-31-8', '3233-56-5'], 'CHEBI': ['133089'], 'HMDB': ['HMDB0240655'], 'INCHIKEY': ['CYGSXDXRHXMAOV-UHFFFAOYSA-N'], 'PUBCHEM.COMPOUND': ['11615528'], 'RM': ['0002581'], 'UNII': ['3X87HHK9AG']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "o-cresol sulfate",
+      "sourceId": "inputs_1555609921.xlsx:O-CRESOLSULFATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "11615528",
+      "targetId": "11615528",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['26590-31-8', '3233-56-5'], 'CHEBI': ['133089'], 'HMDB': ['HMDB0240655'], 'INCHIKEY': ['CYGSXDXRHXMAOV-UHFFFAOYSA-N'], 'PUBCHEM.COMPOUND': ['11615528'], 'RM': ['0002581'], 'UNII': ['3X87HHK9AG']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "gamma-glutamylalanine",
+      "sourceId": "inputs_1555609921.xlsx:GAMMA-GLUTAMYLALANINE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:50619",
+      "targetId": "CHEBI:50619",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['5875-41-2'], 'CHEBI': ['50619'], 'HMDB': ['HMDB0006248'], 'INCHIKEY': ['WQXXXVRAFAKQJM-WHFBIAKZSA-N'], 'KEGG.COMPOUND': ['C03740'], 'MESH': ['C061654'], 'PUBCHEM.COMPOUND': ['440103'], 'PathWhiz.Compound': ['40693'], 'RM': ['0136304']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "gamma-glutamylalanine",
+      "sourceId": "inputs_1555609921.xlsx:GAMMA-GLUTAMYLALANINE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "440103",
+      "targetId": "440103",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['5875-41-2'], 'CHEBI': ['50619'], 'HMDB': ['HMDB0006248'], 'INCHIKEY': ['WQXXXVRAFAKQJM-WHFBIAKZSA-N'], 'KEGG.COMPOUND': ['C03740'], 'MESH': ['C061654'], 'PUBCHEM.COMPOUND': ['440103'], 'PathWhiz.Compound': ['40693'], 'RM': ['0136304']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "C-glycosyltryptophan",
+      "sourceId": "inputs_1555609921.xlsx:C-GLYCOSYLTRYPTOPHAN",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:165856",
+      "targetId": "CHEBI:165856",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CHEBI': ['165856'], 'INCHIKEY': ['CPXSBHKDEPPWIX-NJORQXHJSA-N'], 'MESH': ['C000721088'], 'PUBCHEM.COMPOUND': ['21775807'], 'RM': ['0139331']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "C-glycosyltryptophan",
+      "sourceId": "inputs_1555609921.xlsx:C-GLYCOSYLTRYPTOPHAN",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "10981970",
+      "targetId": "10981970",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CHEBI': ['165856'], 'INCHIKEY': ['CPXSBHKDEPPWIX-NJORQXHJSA-N'], 'MESH': ['C000721088'], 'PUBCHEM.COMPOUND': ['21775807'], 'RM': ['0139331']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "bilirubin (E,E)*",
+      "sourceId": "inputs_1555609921.xlsx:BILIRUBIN(E,E)",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:16990",
+      "targetId": "CHEBI:16990",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['18422-02-1', '211-239-7', '635-65-4'], 'CHEBI': ['16990'], 'CHEMBL.COMPOUND': ['CHEMBL501680'], 'CHEMBL.TARGET': ['CHEMBL2364174'], 'CHV': ['0000001867'], 'GTOPDB': ['4577'], 'HMDB': ['HMDB0000054'], 'INCHIKEY': ['BPYKTIZUTYGOLE-IFADSCNNSA-N'], 'KEGG.COMPOUND': ['C00486'], 'LOINC': ['LP15448-1'], 'MESH': ['D001663'], 'NCIT': ['C305'], 'PUBCHEM.COMPOUND': ['5280352'], 'PathWhiz.Compound':"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "bilirubin (E,E)*",
+      "sourceId": "inputs_1555609921.xlsx:BILIRUBIN(E,E)",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "5315454",
+      "targetId": "5315454",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['18422-02-1', '211-239-7', '635-65-4'], 'CHEBI': ['16990'], 'CHEMBL.COMPOUND': ['CHEMBL501680'], 'CHEMBL.TARGET': ['CHEMBL2364174'], 'CHV': ['0000001867'], 'GTOPDB': ['4577'], 'HMDB': ['HMDB0000054'], 'INCHIKEY': ['BPYKTIZUTYGOLE-IFADSCNNSA-N'], 'KEGG.COMPOUND': ['C00486'], 'LOINC': ['LP15448-1'], 'MESH': ['D001663'], 'NCIT': ['C305'], 'PUBCHEM.COMPOUND': ['5280352'], 'PathWhiz.Compound':"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "5alpha-pregnan-3(alpha or beta),20beta-diol\ndisulfate",
+      "sourceId": "inputs_1555609921.xlsx:5ALPHA-PREGNAN-3\n(ALPHAORBETA),20BETA-DIOLDISULFATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:133467",
+      "targetId": "CHEBI:133467",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CHEBI': ['133467'], 'INCHIKEY': ['LSQGWMYMIHQKSA-PKGCTGQPSA-L'], 'PUBCHEM.COMPOUND': ['122164829']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "5alpha-pregnan-3(alpha or beta),20beta-diol\ndisulfate",
+      "sourceId": "inputs_1555609921.xlsx:5ALPHA-PREGNAN-3\n(ALPHAORBETA),20BETA-DIOLDISULFATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "5127902",
+      "targetId": "5127902",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CHEBI': ['133467'], 'INCHIKEY': ['LSQGWMYMIHQKSA-PKGCTGQPSA-L'], 'PUBCHEM.COMPOUND': ['122164829']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "4-hydroxycoumarin",
+      "sourceId": "inputs_1555609921.xlsx:4-HYDROXYCOUMARIN",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:40070",
+      "targetId": "CHEBI:40070",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['1076-38-6', '214-060-2', '22105-09-5'], 'CHEBI': ['40070'], 'CHEMBL.COMPOUND': ['CHEMBL301141'], 'DRUGBANK': ['DB03410'], 'HMDB': ['HMDB0137904'], 'INCHIKEY': ['VXIXUWQIVKSKSA-UHFFFAOYSA-N'], 'KEGG.COMPOUND': ['C20414'], 'MESH': ['C007998', 'C068805'], 'PUBCHEM.COMPOUND': ['54682930'], 'RM': ['0128475'], 'UMLS': ['C0097101', 'C0603366'], 'UNII': ['X954ZLL2RD']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "4-hydroxycoumarin",
+      "sourceId": "inputs_1555609921.xlsx:4-HYDROXYCOUMARIN",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "54682930",
+      "targetId": "54682930",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['1076-38-6', '214-060-2', '22105-09-5'], 'CHEBI': ['40070'], 'CHEMBL.COMPOUND': ['CHEMBL301141'], 'DRUGBANK': ['DB03410'], 'HMDB': ['HMDB0137904'], 'INCHIKEY': ['VXIXUWQIVKSKSA-UHFFFAOYSA-N'], 'KEGG.COMPOUND': ['C20414'], 'MESH': ['C007998', 'C068805'], 'PUBCHEM.COMPOUND': ['54682930'], 'RM': ['0128475'], 'UMLS': ['C0097101', 'C0603366'], 'UNII': ['X954ZLL2RD']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "N-acetyl-beta-alanine",
+      "sourceId": "inputs_1555609921.xlsx:N-ACETYL-BETA-ALANINE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "76406",
+      "targetId": "76406",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['3025-95-4'], 'CHEBI': ['16682'], 'HMDB': ['HMDB0061880'], 'INCHIKEY': ['LJLLAWRMBZNPMO-UHFFFAOYSA-N'], 'KEGG.COMPOUND': ['C01073'], 'PUBCHEM.COMPOUND': ['76406'], 'RM': ['0131855'], 'UNII': ['NWH65K85HP']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "N-acetyl-beta-alanine",
+      "sourceId": "inputs_1555609921.xlsx:N-ACETYL-BETA-ALANINE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:16682",
+      "targetId": "CHEBI:16682",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['3025-95-4'], 'CHEBI': ['16682'], 'HMDB': ['HMDB0061880'], 'INCHIKEY': ['LJLLAWRMBZNPMO-UHFFFAOYSA-N'], 'KEGG.COMPOUND': ['C01073'], 'PUBCHEM.COMPOUND': ['76406'], 'RM': ['0131855'], 'UNII': ['NWH65K85HP']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "pregnenolone sulfate",
+      "sourceId": "inputs_1555609921.xlsx:PREGNENOLONESULFATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:35420",
+      "targetId": "CHEBI:35420",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['1247-64-9'], 'CHEBI': ['35420'], 'CHEMBL.COMPOUND': ['CHEMBL1179605'], 'HMDB': ['HMDB0060382'], 'INCHIKEY': ['DIJBBUIOWGGQOP-QGVNFLHTSA-N'], 'KEGG.COMPOUND': ['C18044'], 'LM': ['ST05020014'], 'LOINC': ['LP420892-4'], 'MESH': ['C018370'], 'PUBCHEM.COMPOUND': ['105074'], 'RM': ['0138917'], 'SMILES': ['CC(=O)[C@H]1CC[C@H]2[C@@H]3CC=C4C[C@@H](OS(=O)(=O)O)CC[C@]4(C)[C@H]3CC[C@]12C'], 'UMLS': "
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "pregnenolone sulfate",
+      "sourceId": "inputs_1555609921.xlsx:PREGNENOLONESULFATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "105074",
+      "targetId": "105074",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['1247-64-9'], 'CHEBI': ['35420'], 'CHEMBL.COMPOUND': ['CHEMBL1179605'], 'HMDB': ['HMDB0060382'], 'INCHIKEY': ['DIJBBUIOWGGQOP-QGVNFLHTSA-N'], 'KEGG.COMPOUND': ['C18044'], 'LM': ['ST05020014'], 'LOINC': ['LP420892-4'], 'MESH': ['C018370'], 'PUBCHEM.COMPOUND': ['105074'], 'RM': ['0138917'], 'SMILES': ['CC(=O)[C@H]1CC[C@H]2[C@@H]3CC=C4C[C@@H](OS(=O)(=O)O)CC[C@]4(C)[C@H]3CC[C@]12C'], 'UMLS': "
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "13-HODE + 9-HODE",
+      "sourceId": "inputs_1555609921.xlsx:13-HODE+9-HODE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "43013",
+      "targetId": "43013",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CHEBI': ['133819'], 'INCHIKEY': ['HNICUWMFWZBIFP-BSZOFBHHSA-M'], 'PUBCHEM.COMPOUND': ['122198256']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "13-HODE + 9-HODE",
+      "sourceId": "inputs_1555609921.xlsx:13-HODE+9-HODE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:133819",
+      "targetId": "CHEBI:133819",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CHEBI': ['133819'], 'INCHIKEY': ['HNICUWMFWZBIFP-BSZOFBHHSA-M'], 'PUBCHEM.COMPOUND': ['122198256']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "N-acetyl-3-methylhistidine*",
+      "sourceId": "inputs_1555609921.xlsx:N-ACETYL-3-METHYLHISTIDINE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "193270",
+      "targetId": "193270",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['37841-04-6'], 'CHEBI': ['133183'], 'HMDB': ['HMDB0240341'], 'INCHIKEY': ['FKTXRTPBUWLETL-QMMMGPOBSA-N'], 'MESH': ['C018440'], 'PUBCHEM.COMPOUND': ['193270'], 'RM': ['0137481']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "N-acetyl-3-methylhistidine*",
+      "sourceId": "inputs_1555609921.xlsx:N-ACETYL-3-METHYLHISTIDINE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:133183",
+      "targetId": "CHEBI:133183",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['37841-04-6'], 'CHEBI': ['133183'], 'HMDB': ['HMDB0240341'], 'INCHIKEY': ['FKTXRTPBUWLETL-QMMMGPOBSA-N'], 'MESH': ['C018440'], 'PUBCHEM.COMPOUND': ['193270'], 'RM': ['0137481']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "ibuprofen acyl glucuronide",
+      "sourceId": "inputs_1555609921.xlsx:IBUPROFENACYLGLUCURONIDE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:88735",
+      "targetId": "CHEBI:88735",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['115075-59-7'], 'CHEBI': ['88735'], 'CHEMBL.COMPOUND': ['CHEMBL3526740'], 'INCHIKEY': ['ABOLXXZAJIAUGR-JPMMFUSZSA-N'], 'MESH': ['C081281'], 'PUBCHEM.COMPOUND': ['163959'], 'UMLS': ['C0216352']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "ibuprofen acyl glucuronide",
+      "sourceId": "inputs_1555609921.xlsx:IBUPROFENACYLGLUCURONIDE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "163959",
+      "targetId": "163959",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['115075-59-7'], 'CHEBI': ['88735'], 'CHEMBL.COMPOUND': ['CHEMBL3526740'], 'INCHIKEY': ['ABOLXXZAJIAUGR-JPMMFUSZSA-N'], 'MESH': ['C081281'], 'PUBCHEM.COMPOUND': ['163959'], 'UMLS': ['C0216352']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "eicosanodioate",
+      "sourceId": "inputs_1555609921.xlsx:EICOSANODIOATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:73728",
+      "targetId": "CHEBI:73728",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['2424-92-2', '679-934-1'], 'CHEBI': ['73728'], 'HMDB': ['HMDB0242141'], 'INCHIKEY': ['JJOJFIHJIRWASH-UHFFFAOYSA-N'], 'LM': ['FA01170035'], 'PLANTFA': ['10247'], 'PUBCHEM.COMPOUND': ['75502'], 'RM': ['0149936'], 'SMILES': ['O=C(O)CCCCCCCCCCCCCCCCCCC(=O)O'], 'UNII': ['SOD235TGNZ']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "eicosanodioate",
+      "sourceId": "inputs_1555609921.xlsx:EICOSANODIOATE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "75502",
+      "targetId": "75502",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['2424-92-2', '679-934-1'], 'CHEBI': ['73728'], 'HMDB': ['HMDB0242141'], 'INCHIKEY': ['JJOJFIHJIRWASH-UHFFFAOYSA-N'], 'LM': ['FA01170035'], 'PLANTFA': ['10247'], 'PUBCHEM.COMPOUND': ['75502'], 'RM': ['0149936'], 'SMILES': ['O=C(O)CCCCCCCCCCCCCCCCCCC(=O)O'], 'UNII': ['SOD235TGNZ']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "quinine",
+      "sourceId": "inputs_1555609921.xlsx:QUININE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "2728270",
+      "targetId": "2728270",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'ATC': ['C01BA01', 'P01BC01'], 'CAS': ['11034-22-3', '1234784-40-7', '130-95-0', '200-046-3', '200-279-0', '205-003-2', '207671-44-1', '208-970-9', '212-359-2', '230-333-9', '344899-08-7', '344899-12-3', '47342-58-5', '56-54-2', '6587-33-3', '72402-53-0', '747-45-5', '7681-28-9', '7778-93-0'], 'CHEBI': ['15854', '182417', '27502', '28593', '52250'], 'CHEMBL.COMPOUND': ['CHEMBL1200437', 'CHEMBL120"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "quinine",
+      "sourceId": "inputs_1555609921.xlsx:QUININE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:15854",
+      "targetId": "CHEBI:15854",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'ATC': ['C01BA01', 'P01BC01'], 'CAS': ['11034-22-3', '1234784-40-7', '130-95-0', '200-046-3', '200-279-0', '205-003-2', '207671-44-1', '208-970-9', '212-359-2', '230-333-9', '344899-08-7', '344899-12-3', '47342-58-5', '56-54-2', '6587-33-3', '72402-53-0', '747-45-5', '7681-28-9', '7778-93-0'], 'CHEBI': ['15854', '182417', '27502', '28593', '52250'], 'CHEMBL.COMPOUND': ['CHEMBL1200437', 'CHEMBL120"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "N-oleoyltaurine",
+      "sourceId": "inputs_1555609921.xlsx:N-OLEOYLTAURINE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "6437033",
+      "targetId": "6437033",
+      "targetDataset": "PubChem",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['52514-04-2'], 'CHEBI': ['146206'], 'HMDB': ['HMDB0242113'], 'INCHIKEY': ['KOGRJTUIKPMZEJ-KTKRTIGZSA-N'], 'LM': ['FA08020081'], 'MESH': ['C581016'], 'PUBCHEM.COMPOUND': ['6437033'], 'RM': ['0153359'], 'SMILES': ['CCCCCCCC/C=C\\\\CCCCCCCC(=O)NCCS(=O)(=O)O'], 'UMLS': ['C3659439']}"
+      }
+    },
+    {
+      "pairType": "metabolite-identity-adjudication",
+      "sourceText": "N-oleoyltaurine",
+      "sourceId": "inputs_1555609921.xlsx:N-OLEOYLTAURINE",
+      "sourceDataset": "inputs_1555609921.xlsx",
+      "targetText": "CHEBI:146206",
+      "targetId": "CHEBI:146206",
+      "targetDataset": "KG",
+      "targetMetadata": {
+        "kg_equivalent_ids": "{'CAS': ['52514-04-2'], 'CHEBI': ['146206'], 'HMDB': ['HMDB0242113'], 'INCHIKEY': ['KOGRJTUIKPMZEJ-KTKRTIGZSA-N'], 'LM': ['FA08020081'], 'MESH': ['C581016'], 'PUBCHEM.COMPOUND': ['6437033'], 'RM': ['0153359'], 'SMILES': ['CCCCCCCC/C=C\\\\CCCCCCCC(=O)NCCS(=O)(=O)O'], 'UMLS': ['C3659439']}"
+      }
+    }
+  ]
+}
