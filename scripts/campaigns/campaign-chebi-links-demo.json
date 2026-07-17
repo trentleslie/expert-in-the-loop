@@ -3,7 +3,7 @@
     "name": "ChEBI identity adjudication \u2014 external-links demo (DEV)",
     "campaignType": "metabolite-chebi-identity-adjudication",
     "description": "DEV demo of the external-link + config-at-import feature: two candidate ChEBI identifiers per metabolite name, blinded + randomized, each clickable through to its ChEBI entry.",
-    "instructions": "For each metabolite name, choose Match if the shown ChEBI identifier is the correct identity, No Match if it is not, or Unsure. Across a name's two candidate ChEBI identifiers, the expected outcome is one Match and one No Match.",
+    "instructions": "For each metabolite name, choose Match if the shown ChEBI identifier is the correct identity for that metabolite, No Match if it is not, or Unsure. Judge each candidate on its own \u2014 you may see more than one candidate for the same name, and each is scored independently.",
     "config": {
       "scoring": {
         "mode": "binary",
