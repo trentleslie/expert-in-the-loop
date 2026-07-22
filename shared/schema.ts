@@ -310,6 +310,12 @@ export type CampaignWithStats = Campaign & {
   // Evidence-tier breakdown for progress reporting (R12). Optional so callers
   // that don't compute it stay valid.
   evidenceTiers?: Record<EvidenceStatus, number>;
+  // The caller's per-campaign membership role, present on the reviewer-home
+  // list (Axis-1's listCampaignsForUser tags each visible campaign). Optional /
+  // nullable: admin-facing lists (getCampaignsWithStats) omit it, and an admin
+  // viewing a campaign they don't belong to carries null. The client folds
+  // isAdmin → implicit owner regardless (CS1).
+  viewerRole?: MembershipRole | null;
 };
 
 export type PairWithVotes = Pair & {

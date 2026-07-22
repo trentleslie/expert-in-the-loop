@@ -1,20 +1,31 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { 
-  ClipboardList, 
-  ArrowRight, 
-  TrendingUp, 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  ClipboardList,
+  ArrowRight,
+  TrendingUp,
   CheckCircle2,
-  Clock,
-  BarChart3 
+  BarChart3,
+  MoreVertical,
+  Link2,
+  Users,
 } from "lucide-react";
 import { Link } from "wouter";
+import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
-import { partitionByMembership } from "@/lib/campaignFocus";
+import { deriveRoleById, sortByOwnership, type ViewerRole } from "@/lib/campaignFocus";
+import { MembersDialog } from "@/components/MembersDialog";
 import type { CampaignWithStats, UserStats } from "@shared/schema";
 import {
   EVIDENCE_TIER_META,
@@ -93,9 +104,32 @@ function EvidenceTierProgress({
   );
 }
 
-function CampaignCard({ campaign }: { campaign: CampaignWithStats }) {
-  const progress = campaign.totalPairs > 0 
-    ? Math.round((campaign.reviewedPairs / campaign.totalPairs) * 100) 
+function CampaignCard({
+  campaign,
+  role,
+  canManage,
+}: {
+  campaign: CampaignWithStats;
+  role: ViewerRole;
+  // Owner affordances (Members dialog + copy link) render when the viewer owns
+  // this campaign or is an admin (R6/R9). Admin is a global superset.
+  canManage: boolean;
+}) {
+  const { toast } = useToast();
+  const [membersOpen, setMembersOpen] = useState(false);
+
+  const handleCopyLink = async () => {
+    const url = `${window.location.origin}/campaigns/${campaign.id}/join`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast({ title: "Share link copied", description: url });
+    } catch {
+      toast({ title: "Couldn't copy link", description: url, variant: "destructive" });
+    }
+  };
+
+  const progress = campaign.totalPairs > 0
+    ? Math.round((campaign.reviewedPairs / campaign.totalPairs) * 100)
     : 0;
 
   const getStatusColor = (status: string) => {
@@ -131,13 +165,50 @@ function CampaignCard({ campaign }: { campaign: CampaignWithStats }) {
               </CardDescription>
             )}
           </div>
-          <Badge 
-            variant="outline" 
-            className={`flex-shrink-0 text-xs ${getStatusColor(campaign.status)}`}
-            data-testid={`badge-campaign-status-${campaign.id}`}
-          >
-            {campaign.status}
-          </Badge>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <Badge
+              variant="outline"
+              className={`text-xs ${getStatusColor(campaign.status)}`}
+              data-testid={`badge-campaign-status-${campaign.id}`}
+            >
+              {campaign.status}
+            </Badge>
+            {role === "owner" && (
+              <Badge variant="secondary" className="text-xs" data-testid={`badge-owner-${campaign.id}`}>
+                Owner
+              </Badge>
+            )}
+            {canManage && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    data-testid={`button-owner-menu-${campaign.id}`}
+                  >
+                    <MoreVertical className="w-4 h-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onClick={() => setMembersOpen(true)}
+                    data-testid={`button-members-${campaign.id}`}
+                  >
+                    <Users className="w-4 h-4 mr-2" />
+                    Members
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={handleCopyLink}
+                    data-testid={`button-copy-link-${campaign.id}`}
+                  >
+                    <Link2 className="w-4 h-4 mr-2" />
+                    Copy share link
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -157,8 +228,8 @@ function CampaignCard({ campaign }: { campaign: CampaignWithStats }) {
         </div>
 
         <Link href={`/review/${campaign.id}`}>
-          <Button 
-            className="w-full gap-2" 
+          <Button
+            className="w-full gap-2"
             disabled={campaign.status !== "active"}
             data-testid={`button-review-campaign-${campaign.id}`}
           >
@@ -167,6 +238,13 @@ function CampaignCard({ campaign }: { campaign: CampaignWithStats }) {
           </Button>
         </Link>
       </CardContent>
+      {canManage && (
+        <MembersDialog
+          campaign={campaign}
+          open={membersOpen}
+          onOpenChange={setMembersOpen}
+        />
+      )}
     </Card>
   );
 }
@@ -234,15 +312,22 @@ export default function HomePage() {
     queryKey: ["/api/users/me/stats"],
   });
 
-  // Joined campaign ids drive the "Your campaigns" section. Single-string key
-  // (getQueryFn fetches queryKey[0]); the join mutation explicitly invalidates
-  // this exact key so the home refreshes after joining.
-  const { data: joinedIds } = useQuery<string[]>({
-    queryKey: ["/api/users/me/campaigns"],
-  });
-
+  // `GET /api/campaigns` is now the viewer's access-filtered visible set
+  // (Axis-1's listCampaignsForUser), each campaign tagged with `viewerRole`.
+  // The home renders a single owned-first "Your campaigns" list — no separate
+  // join query, no "Browse all" section.
+  // `activeCampaigns` drives the "available to review" stat only. The ownership
+  // surface (below) must ALSO include non-active campaigns (draft/paused/
+  // completed) the viewer owns — otherwise their only view of them vanishes and
+  // the page falsely reads "No campaigns yet". Admins are implicit owners of every
+  // campaign but the server leaves their `viewerRole` null, so include all of
+  // their campaigns explicitly. The card renders those statuses and disables reviewing.
   const activeCampaigns = campaigns?.filter(c => c.status === "active") || [];
-  const { joined, others } = partitionByMembership(activeCampaigns, joinedIds ?? []);
+  const visibleCampaigns = campaigns?.filter(
+    c => isAdmin || c.status === "active" || c.viewerRole === "owner"
+  ) || [];
+  const roleById = deriveRoleById(visibleCampaigns, isAdmin);
+  const orderedCampaigns = sortByOwnership(visibleCampaigns, roleById);
 
   return (
     <div className="min-h-screen bg-background">
@@ -253,7 +338,7 @@ export default function HomePage() {
             Welcome back, {user?.displayName?.split(" ")[0] || "Reviewer"}
           </h1>
           <p className="text-muted-foreground">
-            Continue reviewing mappings or explore active campaigns
+            Continue reviewing the campaigns you own or have joined
           </p>
         </div>
 
@@ -292,7 +377,7 @@ export default function HomePage() {
           )}
         </div>
 
-        {/* Campaigns — your joined ones first, then browse all */}
+        {/* Your campaigns — the access-filtered visible set, owned-first (R1/R2) */}
         {campaignsLoading ? (
           <div className="space-y-4">
             <h2 className="text-lg font-medium text-foreground">Your campaigns</h2>
@@ -302,10 +387,10 @@ export default function HomePage() {
               <CampaignSkeleton />
             </div>
           </div>
-        ) : activeCampaigns.length === 0 ? (
+        ) : (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-medium text-foreground">Active Campaigns</h2>
+              <h2 className="text-lg font-medium text-foreground">Your campaigns</h2>
               {isAdmin && (
                 <Link href="/admin/campaigns">
                   <Button variant="outline" size="sm" data-testid="link-manage-campaigns">
@@ -314,72 +399,38 @@ export default function HomePage() {
                 </Link>
               )}
             </div>
-            <Card className="border-card-border">
-              <CardContent className="flex flex-col items-center justify-center py-12">
-                <div className="p-3 rounded-full bg-muted mb-4">
-                  <Clock className="w-6 h-6 text-muted-foreground" />
-                </div>
-                <h3 className="text-base font-medium text-foreground mb-1">
-                  No Active Campaigns
-                </h3>
-                <p className="text-sm text-muted-foreground text-center max-w-sm">
-                  There are no campaigns available for review at the moment.
-                  Check back later or contact an administrator.
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          <>
-            {/* Your campaigns (joined) */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-medium text-foreground">Your campaigns</h2>
-                {isAdmin && (
-                  <Link href="/admin/campaigns">
-                    <Button variant="outline" size="sm" data-testid="link-manage-campaigns">
-                      Manage Campaigns
-                    </Button>
-                  </Link>
-                )}
+            {orderedCampaigns.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {orderedCampaigns.map((campaign) => {
+                  const role = roleById[campaign.id] ?? "participant";
+                  return (
+                    <CampaignCard
+                      key={campaign.id}
+                      campaign={campaign}
+                      role={role}
+                      canManage={role === "owner" || isAdmin}
+                    />
+                  );
+                })}
               </div>
-              {joined.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {joined.map((campaign) => (
-                    <CampaignCard key={campaign.id} campaign={campaign} />
-                  ))}
-                </div>
-              ) : (
-                <Card className="border-card-border" data-testid="card-no-joined-campaigns">
-                  <CardContent className="flex flex-col items-center justify-center py-10">
-                    <div className="p-3 rounded-full bg-muted mb-4">
-                      <ClipboardList className="w-6 h-6 text-muted-foreground" />
-                    </div>
-                    <h3 className="text-base font-medium text-foreground mb-1">
-                      You haven't joined any campaigns yet
-                    </h3>
-                    <p className="text-sm text-muted-foreground text-center max-w-sm">
-                      {isAdmin
-                        ? "Create or share a campaign from Manage Campaigns, or browse all active campaigns below."
-                        : "Open a campaign link shared by an admin to join it, or browse all active campaigns below."}
-                    </p>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-
-            {/* Browse all (active campaigns not joined) */}
-            {others.length > 0 && (
-              <div className="space-y-4">
-                <h2 className="text-lg font-medium text-foreground">Browse all active campaigns</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {others.map((campaign) => (
-                    <CampaignCard key={campaign.id} campaign={campaign} />
-                  ))}
-                </div>
-              </div>
+            ) : (
+              <Card className="border-card-border" data-testid="card-no-joined-campaigns">
+                <CardContent className="flex flex-col items-center justify-center py-12">
+                  <div className="p-3 rounded-full bg-muted mb-4">
+                    <ClipboardList className="w-6 h-6 text-muted-foreground" />
+                  </div>
+                  <h3 className="text-base font-medium text-foreground mb-1">
+                    No campaigns yet
+                  </h3>
+                  <p className="text-sm text-muted-foreground text-center max-w-sm">
+                    {isAdmin
+                      ? "Create a campaign from Manage Campaigns, then share its link to invite reviewers."
+                      : "Open a campaign link shared by an owner to join it — your campaigns will show up here."}
+                  </p>
+                </CardContent>
+              </Card>
             )}
-          </>
+          </div>
         )}
 
         {/* Recent Activity */}
