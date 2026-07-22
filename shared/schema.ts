@@ -11,6 +11,9 @@ export const campaignStatusEnum = pgEnum("campaign_status", ["draft", "active", 
 // migration-001). scoring_mode stays an enum (multi_criteria deferred — #5).
 export const scoringModeEnum = pgEnum("scoring_mode", ["binary", "numeric"]);
 export const binaryScoreEnum = pgEnum("binary_score", ["match", "no_match", "unsure"]);
+// Campaign membership role — access control (owner/participant). One row per
+// (campaign,user); `role` distinguishes management rights from plain access.
+export const membershipRoleEnum = pgEnum("membership_role", ["owner", "participant"]);
 
 // Users Table
 export const users = pgTable("users", {
@@ -170,16 +173,22 @@ export const importTemplatesRelations = relations(importTemplates, ({ one }) => 
   }),
 }));
 
-// Campaign Memberships Table — reviewer↔campaign association for "focus": a
-// reviewer joins a campaign by opening its shareable link (intentional-only;
-// browsing does NOT join). Drives the joined-first reviewer home + admin roster.
-// NOT access control — the data stays a collective pool.
+// Campaign Memberships Table — reviewer↔campaign association that is now
+// **access control** (owner/participant), reversing the old "collective pool"
+// posture. A reviewer becomes a `participant` by joining (share link) or by
+// having voted (backfill); the campaign creator (and any added co-owner) is an
+// `owner` with membership-management rights. One row per (campaign,user); `role`
+// distinguishes access from management. Membership = visibility: reviewers only
+// see campaigns they own or participate in.
 export const campaignMemberships = pgTable("campaign_memberships", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   campaignId: uuid("campaign_id").references(() => campaigns.id).notNull(),
   // onUpdate:cascade so the Clerk auth ID-migration (UPDATE users SET id=<clerkId>)
   // re-points membership rows instead of FK-violating — like every users.id FK.
   userId: varchar("user_id", { length: 255 }).references(() => users.id, { onUpdate: "cascade" }).notNull(),
+  // Access-control role. Defaulted so db:push backfills existing rows as
+  // 'participant'; the SQL backfill then promotes creators to 'owner'.
+  role: membershipRoleEnum("role").notNull().default("participant"),
   joinedAt: timestamp("joined_at").defaultNow().notNull(),
 }, (table) => ({
   uniqueMembership: unique().on(table.campaignId, table.userId),
@@ -291,6 +300,7 @@ export type InsertImportTemplate = z.infer<typeof insertImportTemplateSchema>;
 
 export type CampaignMembership = typeof campaignMemberships.$inferSelect;
 export type InsertCampaignMembership = z.infer<typeof insertCampaignMembershipSchema>;
+export type MembershipRole = (typeof membershipRoleEnum.enumValues)[number];
 
 // Extended types for frontend
 export type CampaignWithStats = Campaign & {
