@@ -7,8 +7,16 @@ import {
   type AllowedDomain, type InsertAllowedDomain,
   type InsertSkippedPair,
   type ImportTemplate, type InsertImportTemplate,
-  type CampaignWithStats, type UserStats
+  type CampaignWithStats, type UserStats,
+  type MembershipRole
 } from "@shared/schema";
+
+// A campaign in the reviewer-home list, tagged with the caller's membership role
+// (the Axis-2 per-campaign role source; null for admins viewing a campaign they
+// are not a member of).
+export type CampaignWithViewerRole = CampaignWithStats & {
+  viewerRole: MembershipRole | null;
+};
 import {
   campaignConfigSchema,
   DEFAULT_CAMPAIGN_CONFIG,
@@ -34,14 +42,14 @@ export interface IStorage {
   getCampaign(id: string): Promise<Campaign | undefined>;
   getCampaignConfig(campaignId: string): Promise<CampaignConfig>;
   getAllCampaigns(): Promise<CampaignWithStats[]>;
-  getCampaignsWithStats(): Promise<CampaignWithStats[]>;
+  getCampaignsWithStats(campaignIds?: string[]): Promise<CampaignWithStats[]>;
   createCampaign(campaign: InsertCampaign): Promise<Campaign>;
   updateCampaignStatus(id: string, status: Campaign["status"]): Promise<void>;
   updateCampaignConfig(id: string, config: CampaignConfig): Promise<void>;
   updateCampaignDetails(id: string, fields: { name: string; description?: string | null; instructions?: string | null }): Promise<void>;
   recomputeCampaignEvidenceStatus(campaignId: string): Promise<{ recomputed: number; status: "done" | "failed" }>;
   reconcileStaleRecomputes(): Promise<void>;
-  getDistinctCampaignTypes(): Promise<string[]>;
+  getDistinctCampaignTypes(visibleCampaignIds?: string[]): Promise<string[]>;
   
   // Pairs
   getPair(id: string): Promise<Pair | undefined>;
@@ -65,10 +73,21 @@ export interface IStorage {
   // Skipped pairs
   skipPair(pairId: string, userId: string): Promise<void>;
 
-  // Campaign memberships (reviewer↔campaign "focus" association)
+  // Campaign memberships (now access control: owner | participant)
   joinCampaign(campaignId: string, userId: string): Promise<void>;
   getJoinedCampaignIds(userId: string): Promise<string[]>;
-  getCampaignRoster(campaignId: string): Promise<{ userId: string; email: string; displayName: string | null; joinedAt: Date }[]>;
+  getCampaignRoster(campaignId: string): Promise<{ userId: string; email: string; displayName: string | null; role: MembershipRole; joinedAt: Date }[]>;
+  // Access-control point checks and resolvers (used by the campaign-access guard)
+  getCampaignMembership(campaignId: string, userId: string): Promise<{ role: MembershipRole } | null>;
+  getCampaignIdForPair(pairId: string): Promise<string | null>;
+  getCampaignIdForVote(voteId: string): Promise<string | null>;
+  // Visibility = membership (owner ∪ participant)
+  getVisibleCampaignIds(userId: string): Promise<string[]>;
+  listCampaignsForUser(userId: string): Promise<CampaignWithViewerRole[]>;
+  // Membership management (owner-gated at the route layer)
+  addCampaignOwner(campaignId: string, userId: string): Promise<void>;
+  removeCampaignParticipant(campaignId: string, userId: string): Promise<{ removed: boolean; reason?: "last_owner" | "not_found" }>;
+  countCampaignOwners(campaignId: string): Promise<number>;
 
   // Allowed domains
   isDomainAllowed(domain: string): Promise<boolean>;
@@ -144,7 +163,9 @@ export interface IStorage {
   }>;
   
   // Analytics
-  getCampaignAnalyticsSummary(): Promise<{
+  // visibleCampaignIds restricts the cross-campaign aggregate to the caller's
+  // visible set (reviewers); pass undefined for admins (all campaigns).
+  getCampaignAnalyticsSummary(visibleCampaignIds?: string[]): Promise<{
     id: string;
     name: string;
     status: string;
@@ -217,7 +238,9 @@ export interface IStorage {
     }[];
   }>;
   
-  getVotesOverTime(campaignId?: string): Promise<{
+  // When campaignId is absent, visibleCampaignIds restricts the all-campaign
+  // aggregate to the caller's visible set (reviewers); undefined = all (admin).
+  getVotesOverTime(campaignId?: string, visibleCampaignIds?: string[]): Promise<{
     date: string;
     count: number;
     cumulative: number;
@@ -321,8 +344,16 @@ export class DatabaseStorage implements IStorage {
     return this.getCampaignsWithStats();
   }
 
-  async getCampaignsWithStats(): Promise<CampaignWithStats[]> {
-    const campaignList = await db.select().from(campaigns).orderBy(desc(campaigns.createdAt));
+  async getCampaignsWithStats(campaignIds?: string[]): Promise<CampaignWithStats[]> {
+    // Optional visible-id filter — reviewers see only their campaigns. An empty
+    // array means "no visible campaigns" (return nothing), which is distinct
+    // from undefined ("all campaigns", admin).
+    if (campaignIds && campaignIds.length === 0) return [];
+    const campaignList = await db
+      .select()
+      .from(campaigns)
+      .where(campaignIds ? inArray(campaigns.id, campaignIds) : undefined)
+      .orderBy(desc(campaigns.createdAt));
 
     const result: CampaignWithStats[] = [];
     for (const campaign of campaignList) {
@@ -441,10 +472,12 @@ export class DatabaseStorage implements IStorage {
       .where(eq(campaigns.recomputeStatus, "running"));
   }
 
-  async getDistinctCampaignTypes(): Promise<string[]> {
+  async getDistinctCampaignTypes(visibleCampaignIds?: string[]): Promise<string[]> {
+    if (visibleCampaignIds && visibleCampaignIds.length === 0) return [];
     const result = await db
       .selectDistinct({ campaignType: campaigns.campaignType })
       .from(campaigns)
+      .where(visibleCampaignIds ? inArray(campaigns.id, visibleCampaignIds) : undefined)
       .orderBy(campaigns.campaignType);
     return result.map(r => r.campaignType);
   }
@@ -733,7 +766,12 @@ export class DatabaseStorage implements IStorage {
 
   async joinCampaign(campaignId: string, userId: string): Promise<void> {
     // Idempotent on repeat link-opens (composite unique on campaign_id, user_id).
-    await db.insert(campaignMemberships).values({ campaignId, userId }).onConflictDoNothing();
+    // Joins create a 'participant' — set explicitly (don't rely on the column
+    // default) so intent is legible and never demote an existing owner.
+    await db
+      .insert(campaignMemberships)
+      .values({ campaignId, userId, role: "participant" })
+      .onConflictDoNothing();
   }
 
   async getJoinedCampaignIds(userId: string): Promise<string[]> {
@@ -744,20 +782,107 @@ export class DatabaseStorage implements IStorage {
     return rows.map((r) => r.campaignId);
   }
 
-  async getCampaignRoster(campaignId: string): Promise<{ userId: string; email: string; displayName: string | null; joinedAt: Date }[]> {
+  // Visibility now equals membership (owner ∪ participant). Thin alias over
+  // getJoinedCampaignIds to avoid churn in existing callers.
+  async getVisibleCampaignIds(userId: string): Promise<string[]> {
+    return this.getJoinedCampaignIds(userId);
+  }
+
+  async getCampaignRoster(campaignId: string): Promise<{ userId: string; email: string; displayName: string | null; role: MembershipRole; joinedAt: Date }[]> {
     // Membership-derived (NOT vote-derived) — includes reviewers who joined but
-    // haven't voted yet, which the analytics Reviewers tab cannot show.
+    // haven't voted yet, which the analytics Reviewers tab cannot show. Now
+    // carries `role` so the Members dialog can render owner vs participant.
     return db
       .select({
         userId: campaignMemberships.userId,
         email: users.email,
         displayName: users.displayName,
+        role: campaignMemberships.role,
         joinedAt: campaignMemberships.joinedAt,
       })
       .from(campaignMemberships)
       .innerJoin(users, eq(campaignMemberships.userId, users.id))
       .where(eq(campaignMemberships.campaignId, campaignId))
       .orderBy(desc(campaignMemberships.joinedAt));
+  }
+
+  // Point-check for the campaign-access guard: does this user have a membership
+  // in this campaign, and with what role?
+  async getCampaignMembership(campaignId: string, userId: string): Promise<{ role: MembershipRole } | null> {
+    const [row] = await db
+      .select({ role: campaignMemberships.role })
+      .from(campaignMemberships)
+      .where(and(eq(campaignMemberships.campaignId, campaignId), eq(campaignMemberships.userId, userId)));
+    return row ?? null;
+  }
+
+  // Resolve the owning campaign of a pair (for pairParam-sourced guards).
+  async getCampaignIdForPair(pairId: string): Promise<string | null> {
+    const [row] = await db
+      .select({ campaignId: pairs.campaignId })
+      .from(pairs)
+      .where(eq(pairs.id, pairId));
+    return row?.campaignId ?? null;
+  }
+
+  // Resolve the owning campaign of a vote (votes → pairs.campaignId). No
+  // voteId-keyed routes exist today, but the resolver keeps the guard total.
+  async getCampaignIdForVote(voteId: string): Promise<string | null> {
+    const [row] = await db
+      .select({ campaignId: pairs.campaignId })
+      .from(votes)
+      .innerJoin(pairs, eq(votes.pairId, pairs.id))
+      .where(eq(votes.id, voteId));
+    return row?.campaignId ?? null;
+  }
+
+  // Reviewer home list: campaigns the user can see, each tagged with the caller's
+  // membership role. Composes getCampaignsWithStats (filtered to the visible ids)
+  // rather than duplicating the stats query.
+  async listCampaignsForUser(userId: string): Promise<CampaignWithViewerRole[]> {
+    const memberships = await db
+      .select({ campaignId: campaignMemberships.campaignId, role: campaignMemberships.role })
+      .from(campaignMemberships)
+      .where(eq(campaignMemberships.userId, userId));
+    if (memberships.length === 0) return [];
+    const roleByCampaign = new Map(memberships.map((m) => [m.campaignId, m.role]));
+    const stats = await this.getCampaignsWithStats(Array.from(roleByCampaign.keys()));
+    return stats.map((c) => ({ ...c, viewerRole: roleByCampaign.get(c.id) ?? null }));
+  }
+
+  // Add (or promote to) owner. Upsert so an existing participant is promoted and
+  // a brand-new co-owner row is inserted.
+  async addCampaignOwner(campaignId: string, userId: string): Promise<void> {
+    await db
+      .insert(campaignMemberships)
+      .values({ campaignId, userId, role: "owner" })
+      .onConflictDoUpdate({
+        target: [campaignMemberships.campaignId, campaignMemberships.userId],
+        set: { role: "owner" },
+      });
+  }
+
+  async countCampaignOwners(campaignId: string): Promise<number> {
+    const [row] = await db
+      .select({ count: sql<number>`COUNT(*)::int` })
+      .from(campaignMemberships)
+      .where(and(eq(campaignMemberships.campaignId, campaignId), eq(campaignMemberships.role, "owner")));
+    return row?.count ?? 0;
+  }
+
+  // Remove a member. Enforces the ≥1-owner invariant: refuses to remove the last
+  // owner. Returns a discriminated result so the route can map to 404/409.
+  async removeCampaignParticipant(campaignId: string, userId: string): Promise<{ removed: boolean; reason?: "last_owner" | "not_found" }> {
+    const membership = await this.getCampaignMembership(campaignId, userId);
+    if (!membership) return { removed: false, reason: "not_found" };
+    if (membership.role === "owner") {
+      const owners = await this.countCampaignOwners(campaignId);
+      if (owners <= 1) return { removed: false, reason: "last_owner" };
+    }
+    await db
+      .delete(campaignMemberships)
+      .where(and(eq(campaignMemberships.campaignId, campaignId), eq(campaignMemberships.userId, userId)));
+    return { removed: true };
   }
 
   // Allowed domains
@@ -1097,7 +1222,7 @@ export class DatabaseStorage implements IStorage {
     };
   }
   
-  async getCampaignAnalyticsSummary(): Promise<{
+  async getCampaignAnalyticsSummary(visibleCampaignIds?: string[]): Promise<{
     id: string;
     name: string;
     status: string;
@@ -1111,7 +1236,11 @@ export class DatabaseStorage implements IStorage {
     disagreementCount: number;
     daysSinceLastActivity: number | null;
   }[]> {
-    const allCampaigns = await this.getAllCampaigns();
+    // Route-guard alone is insufficient here — this endpoint aggregates ACROSS
+    // campaigns. Restrict to the caller's visible set (reviewers); admins pass
+    // undefined for all. Empty array = no visible campaigns → empty result.
+    if (visibleCampaignIds && visibleCampaignIds.length === 0) return [];
+    const allCampaigns = await this.getCampaignsWithStats(visibleCampaignIds);
     const result = [];
     
     for (const campaign of allCampaigns) {
@@ -1572,26 +1701,36 @@ export class DatabaseStorage implements IStorage {
     };
   }
   
-  async getVotesOverTime(campaignId?: string): Promise<{
+  async getVotesOverTime(campaignId?: string, visibleCampaignIds?: string[]): Promise<{
     date: string;
     count: number;
     cumulative: number;
   }[]> {
     let allVotes: { createdAt: Date }[];
-    
+
     if (campaignId) {
       allVotes = await db
         .select({ createdAt: votes.createdAt })
         .from(votes)
         .innerJoin(pairs, eq(votes.pairId, pairs.id))
         .where(and(eq(pairs.campaignId, campaignId), eq(votes.isActive, true)));
+    } else if (visibleCampaignIds) {
+      // No campaignId → all-campaign aggregate; restrict to the caller's visible
+      // set so a reviewer can't read cross-campaign totals. Empty = no data.
+      if (visibleCampaignIds.length === 0) return [];
+      allVotes = await db
+        .select({ createdAt: votes.createdAt })
+        .from(votes)
+        .innerJoin(pairs, eq(votes.pairId, pairs.id))
+        .where(and(inArray(pairs.campaignId, visibleCampaignIds), eq(votes.isActive, true)));
     } else {
+      // Admin: unfiltered across all campaigns.
       allVotes = await db
         .select({ createdAt: votes.createdAt })
         .from(votes)
         .where(eq(votes.isActive, true));
     }
-    
+
     const dayMap = new Map<string, number>();
     allVotes.forEach(v => {
       const dateStr = new Date(v.createdAt).toISOString().split('T')[0];
