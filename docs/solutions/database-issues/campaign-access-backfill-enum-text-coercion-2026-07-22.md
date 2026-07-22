@@ -134,10 +134,14 @@ Re-running the corrected SQL on `expertloop_dev`: all 11 campaigns have exactly 
   changes"), so enforcing code reached dev before the `role` column/backfill existed. Make the
   verification query (`campaigns_without_owner = 0`) a required go/no-go gate, not a post-hoc glance. See
   the related deploy-ordering doc below.
-- **On the shared prod `expertloop` DB, apply DDL via `psql -f` (reviewed runbook), not `db:push`** — the
-  shared DB also holds `kraken_*`/`session`/`alembic` tables that `db:push` could propose changing. The
-  backfill file header encodes the hard ordering (column DEFAULT fill → `psql -f` backfill → verify counts
-  → deploy enforcing code); follow it.
+- **Apply the additive DDL with the `tablesFilter`-scoped `db:push`, then the data-only backfill via
+  `psql -f` — do not hand-write `CREATE TYPE`/`ADD COLUMN` in SQL.** `db:push` is the repo's schema
+  mechanism (`CLAUDE.md`), and `drizzle.config.ts`'s `tablesFilter` scopes it to this app's tables so it
+  cannot touch the shared `expertloop` DB's `kraken_*`/`session`/`alembic` objects — hand-written DDL
+  would only risk drifting the live DB from `shared/schema.ts`. Still run `db:push` in review/verbose mode
+  and confirm the *only* proposed change is the new enum + column before applying. The backfill file
+  header encodes the ordering: `db:push` (adds the column, DEFAULT fills existing rows) → `psql -f`
+  data backfill → verify counts → deploy enforcing code.
 
 ## Related Issues
 
