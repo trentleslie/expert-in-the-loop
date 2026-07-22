@@ -62,6 +62,7 @@ import {
   Users,
 } from "lucide-react";
 import type { Campaign, CampaignWithStats } from "@shared/schema";
+import { MembersDialog } from "@/components/MembersDialog";
 import { CampaignConfigEditor } from "@/components/CampaignConfigEditor";
 import { DEFAULT_CAMPAIGN_CONFIG, campaignConfigSchema, type CampaignConfig } from "@shared/campaignConfig";
 import { useForm } from "react-hook-form";
@@ -700,17 +701,7 @@ function EditConfigDialog({
 function CampaignCard({ campaign, onUpdate }: { campaign: CampaignWithStats; onUpdate: () => void }) {
   const { toast } = useToast();
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
-  const [rosterOpen, setRosterOpen] = useState(false);
-
-  // Membership-derived roster — includes reviewers who joined but haven't voted
-  // (the analytics Reviewers tab is vote-derived and can't show them). Single-
-  // string key so getQueryFn hits the detail endpoint; only fetched when opened.
-  const { data: roster, isLoading: rosterLoading } = useQuery<
-    { userId: string; email: string; displayName: string | null; joinedAt: string }[]
-  >({
-    queryKey: [`/api/campaigns/${campaign.id}/roster`],
-    enabled: rosterOpen,
-  });
+  const [membersOpen, setMembersOpen] = useState(false);
 
   const handleCopyLink = async () => {
     const url = `${window.location.origin}/campaigns/${campaign.id}/join`;
@@ -805,11 +796,11 @@ function CampaignCard({ campaign, onUpdate }: { campaign: CampaignWithStats; onU
                   Copy share link
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => setRosterOpen(true)}
-                  data-testid={`button-roster-${campaign.id}`}
+                  onClick={() => setMembersOpen(true)}
+                  data-testid={`button-members-${campaign.id}`}
                 >
                   <Users className="w-4 h-4 mr-2" />
-                  Reviewers
+                  Members
                 </DropdownMenuItem>
                 {campaign.status === "draft" && (
                   <DropdownMenuItem onClick={() => updateStatusMutation.mutate("active")}>
@@ -899,44 +890,11 @@ function CampaignCard({ campaign, onUpdate }: { campaign: CampaignWithStats; onU
         onOpenChange={setConfigDialogOpen}
         onUpdate={onUpdate}
       />
-      <Dialog open={rosterOpen} onOpenChange={setRosterOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Reviewers — {campaign.name}</DialogTitle>
-            <DialogDescription>
-              Experts who have joined this campaign via its share link.
-            </DialogDescription>
-          </DialogHeader>
-          {rosterLoading ? (
-            <div className="py-4 space-y-2">
-              <Skeleton className="h-9" />
-              <Skeleton className="h-9" />
-            </div>
-          ) : roster && roster.length > 0 ? (
-            <div className="divide-y divide-border max-h-80 overflow-y-auto">
-              {roster.map((m) => (
-                <div
-                  key={m.userId}
-                  className="flex items-center justify-between gap-3 py-2"
-                  data-testid={`roster-row-${m.userId}`}
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{m.displayName || m.email}</p>
-                    <p className="text-xs text-muted-foreground truncate">{m.email}</p>
-                  </div>
-                  <span className="text-xs text-muted-foreground shrink-0">
-                    {new Date(m.joinedAt).toLocaleDateString()}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="py-6 text-sm text-muted-foreground text-center">
-              No one's joined this campaign yet. Share its link to invite reviewers.
-            </p>
-          )}
-        </DialogContent>
-      </Dialog>
+      <MembersDialog
+        campaign={campaign}
+        open={membersOpen}
+        onOpenChange={setMembersOpen}
+      />
     </Card>
   );
 }
