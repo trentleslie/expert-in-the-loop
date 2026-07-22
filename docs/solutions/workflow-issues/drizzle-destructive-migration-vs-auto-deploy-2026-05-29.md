@@ -73,6 +73,7 @@ Two supporting design choices that make the window safe:
 ## Related
 
 - GitHub issue [#2 — "switch from db:push to Drizzle migration files"](https://github.com/trentleslie/expert-in-the-loop/issues/2): the tracked long-term fix. Versioned migration files run in CI would remove this manual-ordering hazard; until then, the manual maintenance-window sequence above is the workaround.
+- [Campaign-access backfill: Postgres enum literal coerced to text](../database-issues/campaign-access-backfill-enum-text-coercion-2026-07-22.md) — this exact ordering hazard **recurred** on the owner/participant migration (2026-07-22): the enforcing code auto-deployed to `dev` before `db:push` ran, so the app was live without its `role` column. That doc also covers a distinct enum-literal `::cast` bug found while running the backfill.
 - [drizzle-zod widens jsonb $type discriminated unions](../build-errors/drizzle-zod-jsonb-type-widening-2026-05-29.md) — same `shared/schema.ts` / `db:push` surface.
 - `docs/solutions/best-practices/clerk-auth-migration-express-react-2026-05-06.md` — "test on `expertloop_dev` first, then prod" precedent (covers auth/user-ID migration, not schema migration).
 - `CLAUDE.md` → Deployment / "Schema changes: `npm run db:push` must be run manually … on each database."
