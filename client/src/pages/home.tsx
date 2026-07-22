@@ -316,9 +316,17 @@ export default function HomePage() {
   // (Axis-1's listCampaignsForUser), each campaign tagged with `viewerRole`.
   // The home renders a single owned-first "Your campaigns" list — no separate
   // join query, no "Browse all" section.
+  // `activeCampaigns` drives the "available to review" stat only. The ownership
+  // surface (below) must ALSO include the viewer's own non-active campaigns
+  // (draft/paused/completed) — otherwise a non-admin owner's only view of them
+  // vanishes and the page falsely reads "No campaigns yet". The card renders
+  // those statuses and disables reviewing.
   const activeCampaigns = campaigns?.filter(c => c.status === "active") || [];
-  const roleById = deriveRoleById(activeCampaigns, isAdmin);
-  const orderedCampaigns = sortByOwnership(activeCampaigns, roleById);
+  const visibleCampaigns = campaigns?.filter(
+    c => c.status === "active" || c.viewerRole === "owner"
+  ) || [];
+  const roleById = deriveRoleById(visibleCampaigns, isAdmin);
+  const orderedCampaigns = sortByOwnership(visibleCampaigns, roleById);
 
   return (
     <div className="min-h-screen bg-background">

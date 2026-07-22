@@ -68,7 +68,7 @@ export function MembersDialog({
   const [pendingRemove, setPendingRemove] = useState<RosterMember | null>(null);
 
   const rosterKey = [`/api/campaigns/${campaign.id}/roster`];
-  const { data: roster, isLoading } = useQuery<RosterMember[]>({
+  const { data: roster, isLoading, isError, refetch } = useQuery<RosterMember[]>({
     queryKey: rosterKey,
     enabled: open,
   });
@@ -151,6 +151,20 @@ export function MembersDialog({
             <div className="py-4 space-y-2">
               <Skeleton className="h-9" />
               <Skeleton className="h-9" />
+            </div>
+          ) : isError ? (
+            <div className="py-6 flex flex-col items-center gap-3 text-center" data-testid={`members-error-${campaign.id}`}>
+              <p className="text-sm text-muted-foreground max-w-xs">
+                Couldn't load members — this may be a temporary error or your access may have changed.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetch()}
+                data-testid={`button-members-retry-${campaign.id}`}
+              >
+                Retry
+              </Button>
             </div>
           ) : roster && roster.length > 0 ? (
             <div className="divide-y divide-border max-h-80 overflow-y-auto">
