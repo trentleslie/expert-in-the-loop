@@ -317,13 +317,14 @@ export default function HomePage() {
   // The home renders a single owned-first "Your campaigns" list — no separate
   // join query, no "Browse all" section.
   // `activeCampaigns` drives the "available to review" stat only. The ownership
-  // surface (below) must ALSO include the viewer's own non-active campaigns
-  // (draft/paused/completed) — otherwise a non-admin owner's only view of them
-  // vanishes and the page falsely reads "No campaigns yet". The card renders
-  // those statuses and disables reviewing.
+  // surface (below) must ALSO include non-active campaigns (draft/paused/
+  // completed) the viewer owns — otherwise their only view of them vanishes and
+  // the page falsely reads "No campaigns yet". Admins are implicit owners of every
+  // campaign but the server leaves their `viewerRole` null, so include all of
+  // their campaigns explicitly. The card renders those statuses and disables reviewing.
   const activeCampaigns = campaigns?.filter(c => c.status === "active") || [];
   const visibleCampaigns = campaigns?.filter(
-    c => c.status === "active" || c.viewerRole === "owner"
+    c => isAdmin || c.status === "active" || c.viewerRole === "owner"
   ) || [];
   const roleById = deriveRoleById(visibleCampaigns, isAdmin);
   const orderedCampaigns = sortByOwnership(visibleCampaigns, roleById);
