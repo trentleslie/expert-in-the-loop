@@ -9,12 +9,6 @@ const app = express();
 app.set("trust proxy", 1);
 const httpServer = createServer(app);
 
-declare module "http" {
-  interface IncomingMessage {
-    rawBody: unknown;
-  }
-}
-
 // Clerk FAPI proxy and middleware MUST be mounted before body parsers
 setupAuth(app);
 
@@ -26,9 +20,6 @@ const BODY_LIMIT = "10mb";
 app.use(
   express.json({
     limit: BODY_LIMIT,
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
   }),
 );
 
