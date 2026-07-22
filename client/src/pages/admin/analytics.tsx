@@ -38,6 +38,7 @@ import {
   CheckCircle,
   XCircle,
   AlertCircle,
+  MessageSquare,
 } from "lucide-react";
 import {
   LineChart,
@@ -121,6 +122,11 @@ type DisagreementData = {
     numericScores: number[];
     numericMean: number | null;
     numericStdDev: number | null;
+    reviewerNotes: {
+      note: string;
+      scoreBinary: "match" | "no_match" | "unsure" | null;
+      scoreNumeric: number | null;
+    }[];
   }[];
   byConfidence: {
     bucket: string;
@@ -706,6 +712,28 @@ function DisagreementSection({ data }: { data: DisagreementData }) {
                       </span>
                     )}
                   </div>
+                  {item.reviewerNotes.length > 0 && (
+                    <div className="space-y-1.5 border-t pt-2">
+                      <div className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        Reviewer notes ({item.reviewerNotes.length})
+                      </div>
+                      {item.reviewerNotes.map((rn, j) => (
+                        <div key={j} className="flex items-start gap-2 text-sm" data-testid={`reviewer-note-${item.pair.id}-${j}`}>
+                          {rn.scoreBinary === "match" ? (
+                            <CheckCircle className="w-3.5 h-3.5 text-primary mt-0.5 shrink-0" />
+                          ) : rn.scoreBinary === "no_match" ? (
+                            <XCircle className="w-3.5 h-3.5 text-destructive mt-0.5 shrink-0" />
+                          ) : rn.scoreNumeric !== null ? (
+                            <Badge variant="outline" className="text-xs shrink-0">{rn.scoreNumeric}</Badge>
+                          ) : (
+                            <AlertCircle className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                          )}
+                          <span className="whitespace-pre-wrap break-words">{rn.note}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
