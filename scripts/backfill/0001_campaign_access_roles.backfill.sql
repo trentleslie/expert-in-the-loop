@@ -17,19 +17,25 @@
 
 BEGIN;
 
+-- NOTE: every `role` literal is explicitly cast to `::membership_role`. In an
+-- INSERT ... SELECT DISTINCT (step 3), Postgres resolves a bare string literal to
+-- `text` to dedupe, then refuses the implicit text->enum coercion at insert time
+-- ("column role is of type membership_role but expression is of type text"). The
+-- cast makes the type unambiguous; applied everywhere for consistency.
+
 -- 2. Backfill owners from campaigns.created_by (idempotent)
 --    a) promote existing membership rows whose user is the creator
-UPDATE campaign_memberships m SET role = 'owner'
+UPDATE campaign_memberships m SET role = 'owner'::membership_role
   FROM campaigns c WHERE m.campaign_id = c.id AND m.user_id = c.created_by;
 --    b) insert an owner row for creators with no membership yet
 INSERT INTO campaign_memberships (campaign_id, user_id, role)
-  SELECT c.id, c.created_by, 'owner' FROM campaigns c
-  ON CONFLICT (campaign_id, user_id) DO UPDATE SET role = 'owner';
+  SELECT c.id, c.created_by, 'owner'::membership_role FROM campaigns c
+  ON CONFLICT (campaign_id, user_id) DO UPDATE SET role = 'owner'::membership_role;
 
 -- 3. Backfill participants from prior voters (active OR superseded), excluding
 --    skip-only users (a skip creates no vote row). Never demotes an owner.
 INSERT INTO campaign_memberships (campaign_id, user_id, role)
-  SELECT DISTINCT p.campaign_id, v.user_id, 'participant'
+  SELECT DISTINCT p.campaign_id, v.user_id, 'participant'::membership_role
   FROM votes v JOIN pairs p ON p.id = v.pair_id
   ON CONFLICT (campaign_id, user_id) DO NOTHING;
 
