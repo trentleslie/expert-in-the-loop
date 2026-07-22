@@ -872,17 +872,43 @@ export class DatabaseStorage implements IStorage {
 
   // Remove a member. Enforces the ≥1-owner invariant: refuses to remove the last
   // owner. Returns a discriminated result so the route can map to 404/409.
+  //
+  // The count-then-delete MUST be atomic. Without serialization, two owners
+  // removing each other concurrently both COUNT 2 owners before either DELETE
+  // commits, both pass the `owners <= 1` guard, and both delete — leaving the
+  // campaign with zero owners (invariant violated). We take a FOR UPDATE row lock
+  // on the parent campaign up front: a single, deterministic lock point (no
+  // deadlock) that serializes all membership mutations for one campaign. The
+  // second remover blocks until the first commits, then re-reads the reduced
+  // owner count and is refused. Bounded lock_timeout + retry mirrors castVote so
+  // transient contention doesn't fail the request hard.
   async removeCampaignParticipant(campaignId: string, userId: string): Promise<{ removed: boolean; reason?: "last_owner" | "not_found" }> {
-    const membership = await this.getCampaignMembership(campaignId, userId);
-    if (!membership) return { removed: false, reason: "not_found" };
-    if (membership.role === "owner") {
-      const owners = await this.countCampaignOwners(campaignId);
-      if (owners <= 1) return { removed: false, reason: "last_owner" };
-    }
-    await db
-      .delete(campaignMemberships)
-      .where(and(eq(campaignMemberships.campaignId, campaignId), eq(campaignMemberships.userId, userId)));
-    return { removed: true };
+    return withTransactionRetry(() =>
+      db.transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+        // Serialize concurrent membership mutations for this campaign.
+        await tx.execute(sql`SELECT 1 FROM ${campaigns} WHERE ${campaigns.id} = ${campaignId} FOR UPDATE`);
+
+        const [membership] = await tx
+          .select({ role: campaignMemberships.role })
+          .from(campaignMemberships)
+          .where(and(eq(campaignMemberships.campaignId, campaignId), eq(campaignMemberships.userId, userId)));
+        if (!membership) return { removed: false, reason: "not_found" as const };
+
+        if (membership.role === "owner") {
+          const [row] = await tx
+            .select({ count: sql<number>`COUNT(*)::int` })
+            .from(campaignMemberships)
+            .where(and(eq(campaignMemberships.campaignId, campaignId), eq(campaignMemberships.role, "owner")));
+          if ((row?.count ?? 0) <= 1) return { removed: false, reason: "last_owner" as const };
+        }
+
+        await tx
+          .delete(campaignMemberships)
+          .where(and(eq(campaignMemberships.campaignId, campaignId), eq(campaignMemberships.userId, userId)));
+        return { removed: true };
+      }),
+    );
   }
 
   // Allowed domains
