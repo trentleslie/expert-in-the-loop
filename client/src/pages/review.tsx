@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { classifyReviewError } from "@/lib/reviewError";
 import { getStoredExpandedPanels, REVIEW_PANELS_STORAGE_KEY } from "@/lib/reviewPanels";
 import { getConfirmBeforeSubmit, setConfirmBeforeSubmit } from "@/lib/reviewPreferences";
 import { Switch } from "@/components/ui/switch";
@@ -300,6 +301,7 @@ export default function ReviewPage() {
     isLoading: pairLoading, 
     refetch: refetchPair,
     isError: pairError,
+    error: pairErrorObj,
   } = useQuery<NextPairResponse>({
     queryKey: [`/api/campaigns/${campaignId}/next-pair`, "next-pair", campaignId],
     enabled: !!campaignId,
@@ -531,6 +533,30 @@ export default function ReviewPage() {
   const isSubmitting = voteMutation.isPending || skipMutation.isPending;
 
   if (pairError) {
+    // A non-member (or a participant who oversteps) gets a clean 403/404 from
+    // the API. Present that as "not available to you" with a way out — not a
+    // retryable technical error. Genuine failures keep the Try Again path.
+    if (classifyReviewError(pairErrorObj) === "access") {
+      return (
+        <div className="min-h-screen bg-background flex items-center justify-center p-6">
+          <Card className="max-w-md w-full border-card-border">
+            <CardContent className="flex flex-col items-center py-12">
+              <AlertCircle className="w-12 h-12 text-muted-foreground mb-4" />
+              <h2 className="text-lg font-medium text-foreground mb-2">
+                Campaign not available
+              </h2>
+              <p className="text-sm text-muted-foreground text-center mb-4">
+                This campaign doesn't exist or hasn't been shared with you. Ask an
+                owner for a join link to get access.
+              </p>
+              <Button onClick={() => setLocation("/")} data-testid="button-go-home">
+                Go to Home
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
         <Card className="max-w-md w-full border-card-border">
