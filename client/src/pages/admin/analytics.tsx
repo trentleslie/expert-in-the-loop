@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/lib/auth";
 import { Link } from "wouter";
 import {
   Card,
@@ -857,6 +858,7 @@ function SkipAnalysisSection({ data }: { data: SkipAnalysis }) {
 export default function AnalyticsDashboard() {
   const [selectedCampaign, setSelectedCampaign] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("overview");
+  const { isAdmin } = useAuth();
   
   const { data: campaigns, isLoading: campaignsLoading } = useQuery<CampaignSummary[]>({
     queryKey: ["/api/analytics/campaigns"],
@@ -870,6 +872,11 @@ export default function AnalyticsDashboard() {
   const selectedFull = fullCampaigns?.find((c) => c.id === selectedCampaign);
   const selectedConfig = selectedFull?.config ?? null;
   const selectedEvidenceTiers = selectedFull?.evidenceTiers;
+  // Per-reviewer detail (reviewers/disagreements/skips) exposes other reviewers'
+  // identities and score-linked notes — owner/admin only, to preserve blinding.
+  // Server enforces this (requireCampaignOwner); the client hides the sections so
+  // participants never fire a 403. Aggregate tabs (votes) stay visible to all.
+  const canSeeReviewerDetail = isAdmin || selectedFull?.viewerRole === "owner";
 
   const { data: votesOverTime } = useQuery<VotesOverTime>({
     queryKey: ["/api/analytics/votes-over-time"],
@@ -886,17 +893,17 @@ export default function AnalyticsDashboard() {
 
   const { data: reviewerStats, isLoading: reviewersLoading } = useQuery<ReviewerStat[]>({
     queryKey: [`/api/analytics/campaigns/${selectedCampaign}/reviewers`],
-    enabled: !!selectedCampaign,
+    enabled: !!selectedCampaign && canSeeReviewerDetail,
   });
 
   const { data: disagreements, isLoading: disagreementsLoading } = useQuery<DisagreementData>({
     queryKey: [`/api/analytics/campaigns/${selectedCampaign}/disagreements`],
-    enabled: !!selectedCampaign,
+    enabled: !!selectedCampaign && canSeeReviewerDetail,
   });
 
   const { data: skipAnalysis, isLoading: skipsLoading } = useQuery<SkipAnalysis>({
     queryKey: [`/api/analytics/campaigns/${selectedCampaign}/skips`],
-    enabled: !!selectedCampaign,
+    enabled: !!selectedCampaign && canSeeReviewerDetail,
   });
 
   return (
@@ -1019,18 +1026,22 @@ export default function AnalyticsDashboard() {
                     <BarChart3 className="w-4 h-4 mr-2" />
                     Votes
                   </TabsTrigger>
-                  <TabsTrigger value="reviewers">
-                    <Users className="w-4 h-4 mr-2" />
-                    Reviewers
-                  </TabsTrigger>
-                  <TabsTrigger value="disagreements">
-                    <AlertTriangle className="w-4 h-4 mr-2" />
-                    Disagreements
-                  </TabsTrigger>
-                  <TabsTrigger value="skips">
-                    <SkipForward className="w-4 h-4 mr-2" />
-                    Skips
-                  </TabsTrigger>
+                  {canSeeReviewerDetail && (
+                    <>
+                      <TabsTrigger value="reviewers">
+                        <Users className="w-4 h-4 mr-2" />
+                        Reviewers
+                      </TabsTrigger>
+                      <TabsTrigger value="disagreements">
+                        <AlertTriangle className="w-4 h-4 mr-2" />
+                        Disagreements
+                      </TabsTrigger>
+                      <TabsTrigger value="skips">
+                        <SkipForward className="w-4 h-4 mr-2" />
+                        Skips
+                      </TabsTrigger>
+                    </>
+                  )}
                 </TabsList>
                 
                 <TabsContent value="votes" className="space-y-6">
@@ -1047,35 +1058,39 @@ export default function AnalyticsDashboard() {
                   )}
                 </TabsContent>
                 
-                <TabsContent value="reviewers">
-                  {reviewersLoading ? (
-                    <Skeleton className="h-96" />
-                  ) : reviewerStats && reviewerStats.length > 0 ? (
-                    <ReviewerStatsSection data={reviewerStats} />
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">No reviewers yet</div>
-                  )}
-                </TabsContent>
-                
-                <TabsContent value="disagreements">
-                  {disagreementsLoading ? (
-                    <Skeleton className="h-96" />
-                  ) : disagreements ? (
-                    <DisagreementSection data={disagreements} />
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">No data</div>
-                  )}
-                </TabsContent>
-                
-                <TabsContent value="skips">
-                  {skipsLoading ? (
-                    <Skeleton className="h-96" />
-                  ) : skipAnalysis ? (
-                    <SkipAnalysisSection data={skipAnalysis} />
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">No data</div>
-                  )}
-                </TabsContent>
+                {canSeeReviewerDetail && (
+                  <>
+                    <TabsContent value="reviewers">
+                      {reviewersLoading ? (
+                        <Skeleton className="h-96" />
+                      ) : reviewerStats && reviewerStats.length > 0 ? (
+                        <ReviewerStatsSection data={reviewerStats} />
+                      ) : (
+                        <div className="text-center py-8 text-muted-foreground">No reviewers yet</div>
+                      )}
+                    </TabsContent>
+
+                    <TabsContent value="disagreements">
+                      {disagreementsLoading ? (
+                        <Skeleton className="h-96" />
+                      ) : disagreements ? (
+                        <DisagreementSection data={disagreements} />
+                      ) : (
+                        <div className="text-center py-8 text-muted-foreground">No data</div>
+                      )}
+                    </TabsContent>
+
+                    <TabsContent value="skips">
+                      {skipsLoading ? (
+                        <Skeleton className="h-96" />
+                      ) : skipAnalysis ? (
+                        <SkipAnalysisSection data={skipAnalysis} />
+                      ) : (
+                        <div className="text-center py-8 text-muted-foreground">No data</div>
+                      )}
+                    </TabsContent>
+                  </>
+                )}
               </Tabs>
             )}
           </TabsContent>

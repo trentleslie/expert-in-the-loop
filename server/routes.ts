@@ -939,7 +939,11 @@ export async function registerRoutes(
   });
 
   // ==================== ANALYTICS ROUTES ====================
-  // Analytics routes are accessible to all authenticated users (reviewers and admins)
+  // Aggregate analytics (summary, vote distribution, alpha) are open to any
+  // campaign member (owner|participant). Per-reviewer, decision-linked analytics
+  // (reviewers, disagreements, skips) are OWNER/ADMIN ONLY — exposing another
+  // reviewer's identity, score-linked notes, or vote patterns to an active
+  // participant would break blinding (reviewers must stay independent).
 
   // Campaign analytics summary (all campaigns)
   app.get("/api/analytics/campaigns", requireAuth, async (req, res) => {
@@ -968,8 +972,8 @@ export async function registerRoutes(
     }
   });
 
-  // Reviewer stats for a campaign
-  app.get("/api/analytics/campaigns/:id/reviewers", requireAuth, requireCampaignAccess("param"), async (req, res) => {
+  // Reviewer stats for a campaign — per-reviewer identity + vote patterns (blinding: owner/admin only)
+  app.get("/api/analytics/campaigns/:id/reviewers", requireAuth, requireCampaignOwner("param"), async (req, res) => {
     try {
       const stats = await storage.getReviewerStats(req.params.id);
       res.json(stats);
@@ -979,8 +983,8 @@ export async function registerRoutes(
     }
   });
 
-  // High disagreement pairs for a campaign
-  app.get("/api/analytics/campaigns/:id/disagreements", requireAuth, requireCampaignAccess("param"), async (req, res) => {
+  // High disagreement pairs — includes score-linked reviewer notes (blinding: owner/admin only)
+  app.get("/api/analytics/campaigns/:id/disagreements", requireAuth, requireCampaignOwner("param"), async (req, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 50;
       const pairs = await storage.getHighDisagreementPairs(req.params.id, limit);
@@ -992,8 +996,8 @@ export async function registerRoutes(
     }
   });
 
-  // Skip analysis for a campaign
-  app.get("/api/analytics/campaigns/:id/skips", requireAuth, requireCampaignAccess("param"), async (req, res) => {
+  // Skip analysis — includes per-reviewer skip breakdown (blinding: owner/admin only)
+  app.get("/api/analytics/campaigns/:id/skips", requireAuth, requireCampaignOwner("param"), async (req, res) => {
     try {
       const analysis = await storage.getSkipAnalysis(req.params.id);
       res.json(analysis);
