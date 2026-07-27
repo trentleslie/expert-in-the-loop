@@ -9,24 +9,24 @@ const app = express();
 app.set("trust proxy", 1);
 const httpServer = createServer(app);
 
-declare module "http" {
-  interface IncomingMessage {
-    rawBody: unknown;
-  }
-}
-
 // Clerk FAPI proxy and middleware MUST be mounted before body parsers
 setupAuth(app);
 
-app.use(
-  express.json({
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
-  }),
-);
+// Body-parser limits. Parsers run before route-level auth, so keep the DEFAULT
+// small to bound pre-authentication parse cost (a large body to any path is
+// otherwise fully buffered/parsed before authorization rejects it). ONLY the
+// campaign-pairs import — which POSTs a large `{ pairs: [...] }` JSON body from
+// the column-mapping wizard — gets the 10mb allowance, scoped to its exact path.
+const DEFAULT_BODY_LIMIT = "1mb";
+const IMPORT_BODY_LIMIT = "10mb";
+const isPairImport = (req: Request) =>
+  req.method === "POST" && /^\/api\/campaigns\/[^/]+\/pairs\/?$/.test(req.path);
 
-app.use(express.urlencoded({ extended: false }));
+const jsonDefault = express.json({ limit: DEFAULT_BODY_LIMIT });
+const jsonImport = express.json({ limit: IMPORT_BODY_LIMIT });
+app.use((req, res, next) => (isPairImport(req) ? jsonImport : jsonDefault)(req, res, next));
+
+app.use(express.urlencoded({ extended: false, limit: DEFAULT_BODY_LIMIT }));
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {

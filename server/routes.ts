@@ -13,6 +13,7 @@ import {
 } from "./exportSerializer";
 import { storage } from "./storage";
 import { requireAuth, requireAdmin } from "./auth";
+import { requireCampaignAccess, requireCampaignOwner } from "./campaignAccess";
 import { resolveMigrationEmail } from "./authMigration";
 import { isCampaignJoinable } from "./campaignMembership";
 import { insertCampaignSchema, insertVoteSchema, updateCampaignDetailsSchema, type InsertPair, type Campaign } from "@shared/schema";
@@ -20,6 +21,12 @@ import { RESOLUTION_LAYER_VALUES, campaignConfigSchema } from "@shared/campaignC
 import { z } from "zod";
 
 const upload = multer({ storage: multer.memoryStorage() });
+
+// Global admins are superusers over every campaign (per the admin-superuser
+// ledger decision): they see all campaigns and bypass the per-campaign guard.
+function isAdminReq(req: Request): boolean {
+  return (getAuth(req).sessionClaims as Record<string, unknown>)?.role === "admin";
+}
 
 export async function registerRoutes(
   httpServer: Server,
@@ -99,7 +106,13 @@ export async function registerRoutes(
   // List campaigns
   app.get("/api/campaigns", requireAuth, async (req, res) => {
     try {
-      const campaigns = await storage.getCampaignsWithStats();
+      // Reviewers see only campaigns they own or participate in, each tagged with
+      // their per-campaign role (viewerRole). Admins see all (unfiltered).
+      if (isAdminReq(req)) {
+        const campaigns = await storage.getCampaignsWithStats();
+        return res.json(campaigns);
+      }
+      const campaigns = await storage.listCampaignsForUser(getAuth(req).userId!);
       res.json(campaigns);
     } catch (error) {
       console.error("Error fetching campaigns:", error);
@@ -110,7 +123,11 @@ export async function registerRoutes(
   // Get distinct campaign types for autocomplete
   app.get("/api/campaign-types", requireAuth, async (req, res) => {
     try {
-      const types = await storage.getDistinctCampaignTypes();
+      // Restrict distinct types to the reviewer's visible campaigns (admins: all).
+      const visibleIds = isAdminReq(req)
+        ? undefined
+        : await storage.getVisibleCampaignIds(getAuth(req).userId!);
+      const types = await storage.getDistinctCampaignTypes(visibleIds);
       res.json(types);
     } catch (error) {
       console.error("Error fetching campaign types:", error);
@@ -119,7 +136,7 @@ export async function registerRoutes(
   });
 
   // Get single campaign
-  app.get("/api/campaigns/:id", requireAuth, async (req, res) => {
+  app.get("/api/campaigns/:id", requireAuth, requireCampaignAccess("param"), async (req, res) => {
     try {
       const campaign = await storage.getCampaign(req.params.id);
       if (!campaign) {
@@ -490,7 +507,7 @@ export async function registerRoutes(
   });
 
   // Get next pair for review
-  app.get("/api/campaigns/:id/next-pair", requireAuth, async (req, res) => {
+  app.get("/api/campaigns/:id/next-pair", requireAuth, requireCampaignAccess("param"), async (req, res) => {
     try {
       const campaignId = req.params.id;
       const userId = getAuth(req).userId!;
@@ -661,13 +678,20 @@ export async function registerRoutes(
   }
 
   // Submit vote for a pair
-  app.post("/api/pairs/:id/vote", requireAuth, castVoteHandler);
+  app.post("/api/pairs/:id/vote", requireAuth, requireCampaignAccess("pairParam"), castVoteHandler);
 
   // Skip a pair
-  app.post("/api/pairs/:id/skip", requireAuth, async (req, res) => {
+  app.post("/api/pairs/:id/skip", requireAuth, requireCampaignAccess("pairParam"), async (req, res) => {
     try {
       const pairId = req.params.id;
       const userId = getAuth(req).userId!;
+
+      // Handler-level backstop: skipPair is a bare onConflictDoNothing insert with
+      // no existence check of its own, so re-resolve the pair→campaign here as
+      // defense-in-depth against a middleware-wiring mistake (unlike castVote,
+      // which re-fetches the campaign).
+      const campaignId = await storage.getCampaignIdForPair(pairId);
+      if (!campaignId) return res.status(404).json({ message: "Pair not found" });
 
       await storage.skipPair(pairId, userId);
       res.json({ success: true });
@@ -701,13 +725,51 @@ export async function registerRoutes(
 
   // Roster of who has joined a campaign (membership-derived — includes
   // joined-but-not-yet-voted reviewers, unlike the vote-derived analytics tab).
-  app.get("/api/campaigns/:id/roster", requireAdmin, async (req, res) => {
+  // Relaxed from requireAdmin → requireCampaignOwner so a non-admin owner can
+  // open the Members dialog. Each row carries `role` (owner | participant).
+  app.get("/api/campaigns/:id/roster", requireAuth, requireCampaignOwner("param"), async (req, res) => {
     try {
       const roster = await storage.getCampaignRoster(req.params.id);
       res.json(roster);
     } catch (error) {
       console.error("Error fetching campaign roster:", error);
       res.status(500).json({ message: "Failed to fetch campaign roster" });
+    }
+  });
+
+  // Add a co-owner (promote an existing member or insert an owner row). Owner or
+  // admin only. add-by-email is deferred — this takes a resolved { userId }.
+  app.post("/api/campaigns/:id/owners", requireAuth, requireCampaignOwner("param"), async (req, res) => {
+    try {
+      const { userId } = req.body ?? {};
+      if (!userId || typeof userId !== "string") {
+        return res.status(400).json({ message: "userId is required" });
+      }
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      await storage.addCampaignOwner(req.params.id, userId);
+      res.status(201).json({ success: true });
+    } catch (error) {
+      console.error("Error adding campaign owner:", error);
+      res.status(500).json({ message: "Failed to add campaign owner" });
+    }
+  });
+
+  // Remove a member from the roster. Owner or admin only. Refuses removing the
+  // last owner (≥1-owner invariant).
+  app.delete("/api/campaigns/:id/participants/:userId", requireAuth, requireCampaignOwner("param"), async (req, res) => {
+    try {
+      const result = await storage.removeCampaignParticipant(req.params.id, req.params.userId);
+      if (!result.removed) {
+        if (result.reason === "last_owner") {
+          return res.status(409).json({ message: "Cannot remove the last owner of a campaign" });
+        }
+        return res.status(404).json({ message: "Membership not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error removing campaign participant:", error);
+      res.status(500).json({ message: "Failed to remove campaign participant" });
     }
   });
 
@@ -786,7 +848,7 @@ export async function registerRoutes(
 
   // Edit a vote (correction from vote-history) — supersedes the prior vote via
   // the same atomic create-or-supersede path as POST.
-  app.patch("/api/pairs/:id/vote", requireAuth, castVoteHandler);
+  app.patch("/api/pairs/:id/vote", requireAuth, requireCampaignAccess("pairParam"), castVoteHandler);
 
   // ==================== ADMIN ROUTES ====================
 
@@ -808,7 +870,7 @@ export async function registerRoutes(
   // ==================== INTER-RATER RELIABILITY ====================
 
   // Get Krippendorff's Alpha for a campaign
-  app.get("/api/campaigns/:id/alpha", requireAuth, async (req, res) => {
+  app.get("/api/campaigns/:id/alpha", requireAuth, requireCampaignAccess("param"), async (req, res) => {
     try {
       const result = await storage.calculateKrippendorffAlpha(req.params.id);
       res.json(result);
@@ -877,12 +939,21 @@ export async function registerRoutes(
   });
 
   // ==================== ANALYTICS ROUTES ====================
-  // Analytics routes are accessible to all authenticated users (reviewers and admins)
+  // Aggregate analytics (summary, vote distribution, alpha) are open to any
+  // campaign member (owner|participant). Per-reviewer, decision-linked analytics
+  // (reviewers, disagreements, skips) are OWNER/ADMIN ONLY — exposing another
+  // reviewer's identity, score-linked notes, or vote patterns to an active
+  // participant would break blinding (reviewers must stay independent).
 
   // Campaign analytics summary (all campaigns)
   app.get("/api/analytics/campaigns", requireAuth, async (req, res) => {
     try {
-      const summary = await storage.getCampaignAnalyticsSummary();
+      // Cross-campaign aggregate — restrict to the reviewer's visible set so it
+      // cannot leak other campaigns' totals (admins: unfiltered).
+      const visibleIds = isAdminReq(req)
+        ? undefined
+        : await storage.getVisibleCampaignIds(getAuth(req).userId!);
+      const summary = await storage.getCampaignAnalyticsSummary(visibleIds);
       res.json(summary);
     } catch (error) {
       console.error("Error fetching analytics summary:", error);
@@ -891,7 +962,7 @@ export async function registerRoutes(
   });
 
   // Vote distribution for a campaign
-  app.get("/api/analytics/campaigns/:id/votes", requireAuth, async (req, res) => {
+  app.get("/api/analytics/campaigns/:id/votes", requireAuth, requireCampaignAccess("param"), async (req, res) => {
     try {
       const distribution = await storage.getVoteDistribution(req.params.id);
       res.json(distribution);
@@ -901,8 +972,8 @@ export async function registerRoutes(
     }
   });
 
-  // Reviewer stats for a campaign
-  app.get("/api/analytics/campaigns/:id/reviewers", requireAuth, async (req, res) => {
+  // Reviewer stats for a campaign — per-reviewer identity + vote patterns (blinding: owner/admin only)
+  app.get("/api/analytics/campaigns/:id/reviewers", requireAuth, requireCampaignOwner("param"), async (req, res) => {
     try {
       const stats = await storage.getReviewerStats(req.params.id);
       res.json(stats);
@@ -912,8 +983,8 @@ export async function registerRoutes(
     }
   });
 
-  // High disagreement pairs for a campaign
-  app.get("/api/analytics/campaigns/:id/disagreements", requireAuth, async (req, res) => {
+  // High disagreement pairs — includes score-linked reviewer notes (blinding: owner/admin only)
+  app.get("/api/analytics/campaigns/:id/disagreements", requireAuth, requireCampaignOwner("param"), async (req, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 50;
       const pairs = await storage.getHighDisagreementPairs(req.params.id, limit);
@@ -925,8 +996,8 @@ export async function registerRoutes(
     }
   });
 
-  // Skip analysis for a campaign
-  app.get("/api/analytics/campaigns/:id/skips", requireAuth, async (req, res) => {
+  // Skip analysis — includes per-reviewer skip breakdown (blinding: owner/admin only)
+  app.get("/api/analytics/campaigns/:id/skips", requireAuth, requireCampaignOwner("param"), async (req, res) => {
     try {
       const analysis = await storage.getSkipAnalysis(req.params.id);
       res.json(analysis);
@@ -936,11 +1007,29 @@ export async function registerRoutes(
     }
   });
 
-  // Votes over time (optional campaignId)
+  // Votes over time (optional campaignId query param). campaignId arrives as a
+  // query param (not a route param), so the access check is inline rather than
+  // via the requireCampaignAccess middleware:
+  //   - ?campaignId present → the caller must be a member of that campaign (or
+  //     admin); non-members get 404 (enumeration hardening).
+  //   - absent → restrict the all-campaign aggregate to the caller's visible set.
   app.get("/api/analytics/votes-over-time", requireAuth, async (req, res) => {
     try {
       const campaignId = req.query.campaignId as string | undefined;
-      const data = await storage.getVotesOverTime(campaignId);
+      const admin = isAdminReq(req);
+      const userId = getAuth(req).userId!;
+
+      if (campaignId) {
+        if (!admin) {
+          const membership = await storage.getCampaignMembership(campaignId, userId);
+          if (!membership) return res.status(404).json({ message: "Not found" });
+        }
+        const data = await storage.getVotesOverTime(campaignId);
+        return res.json(data);
+      }
+
+      const visibleIds = admin ? undefined : await storage.getVisibleCampaignIds(userId);
+      const data = await storage.getVotesOverTime(undefined, visibleIds);
       res.json(data);
     } catch (error) {
       console.error("Error fetching votes over time:", error);
