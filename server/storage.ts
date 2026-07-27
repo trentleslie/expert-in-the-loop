@@ -390,8 +390,21 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createCampaign(campaign: InsertCampaign): Promise<Campaign> {
-    const [created] = await db.insert(campaigns).values(campaign).returning();
-    return created;
+    // Create the campaign AND its creator's owner membership atomically. Every
+    // campaign must have >=1 owner so it satisfies the access invariant and stays
+    // manageable without relying on the global-admin bypass (backfill covers
+    // pre-existing campaigns; this covers ones created after deploy).
+    return db.transaction(async (tx) => {
+      const [created] = await tx.insert(campaigns).values(campaign).returning();
+      await tx
+        .insert(campaignMemberships)
+        .values({ campaignId: created.id, userId: created.createdBy, role: "owner" })
+        .onConflictDoUpdate({
+          target: [campaignMemberships.campaignId, campaignMemberships.userId],
+          set: { role: "owner" },
+        });
+      return created;
+    });
   }
 
   async updateCampaignStatus(id: string, status: Campaign["status"]): Promise<void> {
