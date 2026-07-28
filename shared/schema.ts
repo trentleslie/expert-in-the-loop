@@ -9,7 +9,10 @@ export const userRoleEnum = pgEnum("user_role", ["reviewer", "admin"]);
 export const campaignStatusEnum = pgEnum("campaign_status", ["draft", "active", "completed", "archived"]);
 // NOTE: pairType is now free-text (the pair_type pgEnum was dropped in
 // migration-001). scoring_mode stays an enum (multi_criteria deferred — #5).
-export const scoringModeEnum = pgEnum("scoring_mode", ["binary", "numeric"]);
+// "exclusion" (reviewer flags a pair's members that don't belong to the concept)
+// added via `ALTER TYPE scoring_mode ADD VALUE 'exclusion'` — see
+// scripts/migration-005-exclusion-scoring.sql.
+export const scoringModeEnum = pgEnum("scoring_mode", ["binary", "numeric", "exclusion"]);
 export const binaryScoreEnum = pgEnum("binary_score", ["match", "no_match", "unsure"]);
 // Campaign membership role — access control (owner/participant). One row per
 // (campaign,user); `role` distinguishes management rights from plain access.
@@ -105,6 +108,10 @@ export const votes = pgTable("votes", {
   userId: varchar("user_id", { length: 255 }).references(() => users.id, { onUpdate: "cascade" }).notNull(),
   scoreBinary: binaryScoreEnum("score_binary"),
   scoreNumeric: integer("score_numeric"),
+  // Exclusion vote: the member ids the reviewer flagged as NOT belonging to the
+  // concept. Empty ⇒ coherent (one concept); non-empty ⇒ an over-merge. NULL for
+  // binary/numeric votes. Additive jsonb column (db:push-safe).
+  scoreExclusion: jsonb("score_exclusion").$type<{ excluded: string[] }>(),
   scoringMode: scoringModeEnum("scoring_mode").notNull(),
   // Expert selection: alternative LOINC code selected when reviewer disagrees
   expertSelectedCode: text("expert_selected_code"),
@@ -249,7 +256,11 @@ export const insertPairSchema = createInsertSchema(pairs).omit({
   createdAt: true,
 });
 
-export const insertVoteSchema = createInsertSchema(votes).omit({
+export const insertVoteSchema = createInsertSchema(votes, {
+  // drizzle-zod widens a $type'd jsonb column to a loose shape; pin it to the real
+  // exclusion contract so InsertVote.scoreExclusion matches the column's { excluded: string[] }.
+  scoreExclusion: z.object({ excluded: z.array(z.string()) }).nullish(),
+}).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
