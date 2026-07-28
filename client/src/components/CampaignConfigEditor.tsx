@@ -393,8 +393,8 @@ export function CampaignConfigEditor({
                 scoring={value.scoring}
                 onBinarySelect={() => {}}
                 onNumericSelect={() => {}}
-                members={[]}
-                onExclusionSelect={() => {}}
+                exclusionMemberCount={0}
+                onExclusionSubmit={() => {}}
               />
             </div>
           </div>

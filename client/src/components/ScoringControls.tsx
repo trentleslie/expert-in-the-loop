@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Slider } from "@/components/ui/slider";
 import { ThumbsUp, ThumbsDown, HelpCircle, Loader2 } from "lucide-react";
 import type { CampaignConfig } from "@shared/campaignConfig";
@@ -33,9 +32,11 @@ type ScoringControlsProps = {
       // Numeric selection
       numericValue?: number | null;
       onNumericSelect: (value: number) => void;
-      // Exclusion selection: the members to review + the submit callback (excluded = flagged ids).
-      members?: ExclusionMember[];
-      onExclusionSelect?: (excluded: string[]) => void;
+      // Exclusion mode: selection state is lifted to the review page (checkboxes live in the
+      // left entity card). These are a controlled readout + the submit trigger.
+      exclusionMemberCount?: number;
+      exclusionExcludedCount?: number;
+      onExclusionSubmit?: () => void;
     }
 );
 
@@ -200,22 +201,24 @@ function NumericSlider({
   );
 }
 
+/**
+ * The exclusion verdict + Submit bar. The per-member checkboxes live in the review page's
+ * LEFT entity card (the approved two-column layout), so selection state is lifted there; this
+ * control is a thin, fully-controlled readout of that state. `memberCount === 0` ⇒ nothing to
+ * submit (a degenerate pair or the admin preview).
+ */
 function ExclusionControls({
-  members,
+  memberCount,
+  excludedCount,
   onSubmit,
   isSubmitting,
 }: {
-  members: ExclusionMember[];
-  onSubmit: (excluded: string[]) => void;
+  memberCount: number;
+  excludedCount: number;
+  onSubmit: () => void;
   isSubmitting?: boolean;
 }) {
-  // member id -> flagged (does NOT belong). Default: nothing flagged ⇒ "one concept" (coherent).
-  const [flagged, setFlagged] = useState<Record<string, boolean>>({});
-  useEffect(() => {
-    setFlagged({});
-  }, [members]);
-
-  if (members.length === 0) {
+  if (memberCount === 0) {
     return (
       <p className="text-sm text-muted-foreground text-center" data-testid="exclusion-no-members">
         No member variables to review (this pair has no <code>sourceMetadata.members</code>).
@@ -223,58 +226,23 @@ function ExclusionControls({
     );
   }
 
-  const flaggedCount = members.filter((m) => flagged[m.id]).length;
-
-  const submit = () => onSubmit(members.filter((m) => flagged[m.id]).map((m) => m.id));
-
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground text-center">
-        These variables were clustered into one concept. Check any that do NOT belong; leave all unchecked
-        if they are ONE concept.
-      </p>
-      <div className="space-y-2">
-        {members.map((m) => {
-          const isFlagged = !!flagged[m.id];
-          return (
-            <label
-              key={m.id}
-              className={`flex items-start gap-3 rounded-md border p-2 cursor-pointer ${
-                isFlagged ? "border-destructive bg-destructive/5" : ""
-              }`}
-              data-testid={`exclusion-member-${m.id}`}
-            >
-              <Checkbox
-                checked={isFlagged}
-                onCheckedChange={(c) => setFlagged((f) => ({ ...f, [m.id]: c === true }))}
-                disabled={isSubmitting}
-                className="mt-0.5 shrink-0"
-                data-testid={`exclusion-${m.id}-checkbox`}
-              />
-              <span className={`text-sm leading-snug ${isFlagged ? "line-through text-destructive" : ""}`}>
-                {m.text}
-              </span>
-            </label>
-          );
-        })}
-      </div>
-      <div className="flex items-center justify-center gap-4">
-        <span
-          className={`text-xs ${flaggedCount === 0 ? "text-muted-foreground" : "text-destructive font-medium"}`}
-          data-testid="exclusion-verdict"
-        >
-          {flaggedCount === 0 ? "One concept" : `Over-merge — ${flaggedCount} flagged`}
-        </span>
-        <Button
-          size="lg"
-          className="h-12 px-6"
-          onClick={submit}
-          disabled={isSubmitting}
-          data-testid="button-submit-exclusion"
-        >
-          {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : "Submit"}
-        </Button>
-      </div>
+    <div className="flex items-center justify-center gap-4">
+      <span
+        className={`text-sm ${excludedCount === 0 ? "text-muted-foreground" : "text-destructive font-medium"}`}
+        data-testid="exclusion-verdict"
+      >
+        {excludedCount === 0 ? "One concept" : `Over-merge — ${excludedCount} flagged`}
+      </span>
+      <Button
+        size="lg"
+        className="h-12 px-6"
+        onClick={onSubmit}
+        disabled={isSubmitting}
+        data-testid="button-submit-exclusion"
+      >
+        {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : "Submit"}
+      </Button>
     </div>
   );
 }
@@ -303,8 +271,9 @@ export function ScoringControls({ scoring, isSubmitting, ...handlers }: ScoringC
     case "exclusion":
       return (
         <ExclusionControls
-          members={handlers.members ?? []}
-          onSubmit={handlers.onExclusionSelect ?? (() => {})}
+          memberCount={handlers.exclusionMemberCount ?? 0}
+          excludedCount={handlers.exclusionExcludedCount ?? 0}
+          onSubmit={handlers.onExclusionSubmit ?? (() => {})}
           isSubmitting={isSubmitting}
         />
       );
