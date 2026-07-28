@@ -12,6 +12,21 @@ const bin = (s: VoteForScoring["scoreBinary"]): VoteForScoring => ({
   scoreNumeric: null,
 });
 const num = (n: number): VoteForScoring => ({ scoreBinary: null, scoreNumeric: n });
+// A partition vote of `n` groups (only the group COUNT matters to consensus): 1 ⇒ coherent, >1 ⇒ over-merge.
+const part = (n: number): VoteForScoring => ({
+  scoreBinary: null,
+  scoreNumeric: null,
+  scorePartition: { groups: Array.from({ length: n }, (_, i) => [`m${i}`]) },
+});
+const partNull = (): VoteForScoring => ({ scoreBinary: null, scoreNumeric: null, scorePartition: null });
+
+function partitionConfig(consensus: Partial<CampaignConfig["consensus"]> = {}): CampaignConfig {
+  return {
+    ...DEFAULT_CAMPAIGN_CONFIG,
+    scoring: { mode: "partition", partition: { maxGroups: 8 } },
+    consensus: { minVotes: 2, confirmPct: 70, rejectPct: 70, ...consensus },
+  };
+}
 
 function binaryConfig(consensus: Partial<CampaignConfig["consensus"]> = {}): CampaignConfig {
   return {
@@ -110,6 +125,34 @@ describe("computeEvidenceStatus — numeric", () => {
 
   it("mean exactly at reject threshold → expert_rejected (<=)", () => {
     expect(computeEvidenceStatus(numericConfig(), [num(2), num(2)])).toBe("expert_rejected");
+  });
+});
+
+describe("computeEvidenceStatus — partition", () => {
+  it("all one-group votes @ confirm 70 → expert_confirmed (coherent)", () => {
+    expect(computeEvidenceStatus(partitionConfig(), [part(1), part(1)])).toBe("expert_confirmed");
+  });
+
+  it("all multi-group votes @ reject 70 → expert_rejected (over-merge)", () => {
+    expect(computeEvidenceStatus(partitionConfig(), [part(2), part(3)])).toBe("expert_rejected");
+  });
+
+  it("split coherent/over-merge below both thresholds → disputed", () => {
+    // 2 coherent + 1 over-merge of 3 = 67% coherent (< 70), 33% over-merge (< 70)
+    expect(computeEvidenceStatus(partitionConfig(), [part(1), part(1), part(2)])).toBe("disputed");
+  });
+
+  it("ungrouped (null) votes stay in the denominator, contributing to neither side", () => {
+    // 2 coherent + 1 null of 3 = 67% coherent (< 70) → disputed, not confirmed
+    expect(computeEvidenceStatus(partitionConfig(), [part(1), part(1), partNull()])).toBe("disputed");
+    // 3 coherent + 1 null of 4 = 75% (>= 70) → confirmed
+    expect(
+      computeEvidenceStatus(partitionConfig(), [part(1), part(1), part(1), partNull()]),
+    ).toBe("expert_confirmed");
+  });
+
+  it("respects the minVotes gate", () => {
+    expect(computeEvidenceStatus(partitionConfig({ minVotes: 2 }), [part(1)])).toBe("in_review");
   });
 });
 

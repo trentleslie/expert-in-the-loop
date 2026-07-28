@@ -28,9 +28,10 @@ import { campaignConfigSchema, defaultNumericThresholds, type CampaignConfig } f
  * NO multi-criteria mode and NO templates here — both are deferred.
  */
 
-type ScoringMode = "binary" | "numeric";
+type ScoringMode = "binary" | "numeric" | "partition";
 type BinaryScoring = Extract<CampaignConfig["scoring"], { mode: "binary" }>;
 type NumericScoring = Extract<CampaignConfig["scoring"], { mode: "numeric" }>;
+type PartitionScoring = Extract<CampaignConfig["scoring"], { mode: "partition" }>;
 
 const DEFAULT_BINARY: BinaryScoring = {
   mode: "binary",
@@ -39,6 +40,10 @@ const DEFAULT_BINARY: BinaryScoring = {
 const DEFAULT_NUMERIC: NumericScoring = {
   mode: "numeric",
   numeric: { min: 1, max: 5 },
+};
+const DEFAULT_PARTITION: PartitionScoring = {
+  mode: "partition",
+  partition: { maxGroups: 8 },
 };
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
@@ -98,12 +103,16 @@ export function CampaignConfigEditor({
   const [savedNumeric, setSavedNumeric] = useState<NumericScoring>(
     value.scoring.mode === "numeric" ? value.scoring : DEFAULT_NUMERIC,
   );
+  const [savedPartition, setSavedPartition] = useState<PartitionScoring>(
+    value.scoring.mode === "partition" ? value.scoring : DEFAULT_PARTITION,
+  );
 
   const mode = value.scoring.mode;
 
   const setScoring = (scoring: CampaignConfig["scoring"]) => {
     if (scoring.mode === "binary") setSavedBinary(scoring);
-    else setSavedNumeric(scoring);
+    else if (scoring.mode === "numeric") setSavedNumeric(scoring);
+    else setSavedPartition(scoring);
 
     // Follow the range: when the numeric min/max changes and the consensus
     // thresholds are still the values we auto-seeded for the OLD range (i.e.
@@ -145,8 +154,10 @@ export function CampaignConfigEditor({
     if (nextMode === mode) return;
     // Persist the current mode's fields, then restore the target mode's saved state.
     if (mode === "binary") setSavedBinary(value.scoring as BinaryScoring);
-    else setSavedNumeric(value.scoring as NumericScoring);
-    const restored = nextMode === "binary" ? savedBinary : savedNumeric;
+    else if (mode === "numeric") setSavedNumeric(value.scoring as NumericScoring);
+    else setSavedPartition(value.scoring as PartitionScoring);
+    const restored =
+      nextMode === "binary" ? savedBinary : nextMode === "numeric" ? savedNumeric : savedPartition;
     // Seed sensible numeric consensus thresholds the first time a campaign
     // switches to numeric (the schema requires both, with confirm > reject).
     if (
@@ -216,12 +227,13 @@ export function CampaignConfigEditor({
       <div className="space-y-3 border border-border rounded-md p-3">
         <SectionHeading>Scoring Mode</SectionHeading>
         <SectionDescription>
-          How reviewers score each pair: a yes/no/unsure choice (binary) or a numeric scale.
+          How reviewers score each pair: a yes/no/unsure choice (binary), a numeric scale, or grouping a
+          pair's member variables into distinct concepts (partition).
         </SectionDescription>
         <RadioGroup
           value={mode}
           onValueChange={(v) => handleModeChange(v as ScoringMode)}
-          className="flex gap-6"
+          className="flex gap-6 flex-wrap"
         >
           <div className="flex items-center gap-2">
             <RadioGroupItem value="binary" id="mode-binary" data-testid="radio-mode-binary" />
@@ -230,6 +242,10 @@ export function CampaignConfigEditor({
           <div className="flex items-center gap-2">
             <RadioGroupItem value="numeric" id="mode-numeric" data-testid="radio-mode-numeric" />
             <Label htmlFor="mode-numeric">Numeric (scored range)</Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <RadioGroupItem value="partition" id="mode-partition" data-testid="radio-mode-partition" />
+            <Label htmlFor="mode-partition">Partition (group members into concepts)</Label>
           </div>
         </RadioGroup>
 
@@ -295,7 +311,7 @@ export function CampaignConfigEditor({
                 <FieldError k="scoring.binary.labels.positive" />
               </div>
             </div>
-          ) : (
+          ) : mode === "numeric" ? (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3 max-w-xs">
                 <div className="space-y-1">
@@ -360,6 +376,34 @@ export function CampaignConfigEditor({
                 </div>
               </div>
             </div>
+          ) : (
+            <div className="space-y-3 max-w-xs">
+              <div className="space-y-1">
+                <Label htmlFor="partition-max-groups">Max concept groups</Label>
+                <Input
+                  id="partition-max-groups"
+                  type="number"
+                  min={2}
+                  max={26}
+                  value={(value.scoring as PartitionScoring).partition.maxGroups}
+                  onChange={(e) =>
+                    setScoring({
+                      mode: "partition",
+                      partition: {
+                        maxGroups: Math.min(26, Math.max(2, parseInt(e.target.value, 10) || 2)),
+                      },
+                    })
+                  }
+                  data-testid="input-partition-max-groups"
+                />
+                <FieldError k="scoring.partition.maxGroups" />
+              </div>
+              <SectionDescription>
+                Reviewers group each pair&apos;s member variables (from <code>source_metadata.members</code>)
+                into up to this many concepts. Exactly one group ⇒ coherent (confirmed); more than one ⇒ an
+                over-merge (rejected), using the same confirm/reject consensus percentages below.
+              </SectionDescription>
+            </div>
           )}
           {/* Preview as reviewer (read-only) */}
           <div className="rounded-md border border-dashed border-border p-4 bg-muted/30 space-y-2">
@@ -369,6 +413,8 @@ export function CampaignConfigEditor({
                 scoring={value.scoring}
                 onBinarySelect={() => {}}
                 onNumericSelect={() => {}}
+                members={[]}
+                onPartitionSelect={() => {}}
               />
             </div>
           </div>

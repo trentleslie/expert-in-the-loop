@@ -78,8 +78,24 @@ const numericScoringSchema = z.object({
     }),
 });
 
+// Partition scoring: the reviewer groups a pair's member variables (source_metadata.members) into
+// distinct concepts instead of casting one score. Each vote records the grouping; consensus reduces
+// to the binary "is this ONE concept?" (exactly one group ⇒ coherent ⇒ confirmed; more than one ⇒
+// an over-merge ⇒ rejected), so it reuses `consensus.confirmPct` / `rejectPct` — no extra thresholds.
+// The full grouping is retained as the rich payload (which members formed which concept).
+const partitionScoringSchema = z.object({
+  mode: z.literal("partition"),
+  partition: z
+    .object({
+      // UI guardrail on how many concept groups a reviewer may create. The consensus only cares
+      // whether the members fall into ONE group (coherent) or MORE (over-merge); this just bounds the UI.
+      maxGroups: z.number().int().min(2).max(26).default(8),
+    })
+    .default({ maxGroups: 8 }),
+});
+
 const campaignConfigBaseSchema = z.object({
-  scoring: z.discriminatedUnion("mode", [binaryScoringSchema, numericScoringSchema]),
+  scoring: z.discriminatedUnion("mode", [binaryScoringSchema, numericScoringSchema, partitionScoringSchema]),
   consensus: z.object({
     minVotes: z.number().int().min(1).default(2),
     confirmPct: z.number().min(0).max(100).default(70),

@@ -61,7 +61,7 @@ export interface IStorage {
   getCampaignProgress(campaignId: string): Promise<{ reviewed: number; total: number }>;
   
   // Votes
-  castVote(pairId: string, userId: string, voteData: Pick<InsertVote, "scoreBinary" | "scoreNumeric" | "scoringMode" | "expertSelectedCode" | "reviewerNotes">, config: CampaignConfig): Promise<{ vote: Vote; evidenceStatus: EvidenceStatus }>;
+  castVote(pairId: string, userId: string, voteData: Pick<InsertVote, "scoreBinary" | "scoreNumeric" | "scorePartition" | "scoringMode" | "expertSelectedCode" | "reviewerNotes">, config: CampaignConfig): Promise<{ vote: Vote; evidenceStatus: EvidenceStatus }>;
   getVotesByPair(pairId: string): Promise<Vote[]>;
   getUserVotes(userId: string): Promise<(Vote & { pair: Pair })[]>;
   getUserVotesCount(userId: string): Promise<number>;
@@ -610,7 +610,7 @@ export class DatabaseStorage implements IStorage {
   async castVote(
     pairId: string,
     userId: string,
-    voteData: Pick<InsertVote, "scoreBinary" | "scoreNumeric" | "scoringMode" | "expertSelectedCode" | "reviewerNotes">,
+    voteData: Pick<InsertVote, "scoreBinary" | "scoreNumeric" | "scorePartition" | "scoringMode" | "expertSelectedCode" | "reviewerNotes">,
     config: CampaignConfig,
   ): Promise<{ vote: Vote; evidenceStatus: EvidenceStatus }> {
     // Bounded retry on transient contention (serialization/deadlock/lock_timeout)

@@ -65,6 +65,7 @@ const CANONICAL_FIELDS = [
   "evidence_status", "resolution_layer", "llm_confidence", "llm_model",
   "active_vote_count", "total_vote_count",
   "positive_votes", "negative_votes", "unsure_votes",
+  "coherent_votes", "over_merge_votes", "partition_groupings",
   "positive_rate", "mean_score", "expert_selections", "reviewer_notes",
 ];
 
@@ -116,6 +117,26 @@ describe("buildExportRows", () => {
       negative_votes: 0,
       unsure_votes: 1,
       evidence_status: "disputed",
+    });
+  });
+
+  it("partition campaign: coherent/over-merge counts + the groupings payload", () => {
+    const rows = buildExportRows([
+      item({
+        pair: pair({ evidenceStatus: "expert_rejected" }),
+        votes: [
+          vote(null, { scoringMode: "partition", scorePartition: { groups: [["a", "b"]] } }),
+          vote(null, { scoringMode: "partition", scorePartition: { groups: [["a"], ["b"]] } }),
+        ],
+        totalVoteCount: 2,
+      }),
+    ]);
+    expect(rows[0]).toMatchObject({
+      coherent_votes: 1,
+      over_merge_votes: 1,
+      positive_votes: 0,
+      partition_groupings: '[["a","b"]] | [["a"],["b"]]',
+      evidence_status: "expert_rejected",
     });
   });
 });

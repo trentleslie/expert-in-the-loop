@@ -6,6 +6,30 @@ describe("campaignConfigSchema", () => {
     expect(campaignConfigSchema.safeParse(DEFAULT_CAMPAIGN_CONFIG).success).toBe(true);
   });
 
+  it("accepts a partition config (maxGroups defaulted)", () => {
+    const cfg = {
+      scoring: { mode: "partition", partition: {} },
+      consensus: { minVotes: 2, confirmPct: 70, rejectPct: 70 },
+      display: { showExternalLinks: false, showAlternatives: false, showMetadataPanel: true },
+      import: { sourcePrefixFilter: false },
+    };
+    const parsed = campaignConfigSchema.safeParse(cfg);
+    expect(parsed.success).toBe(true);
+    if (parsed.success && parsed.data.scoring.mode === "partition") {
+      expect(parsed.data.scoring.partition.maxGroups).toBe(8); // schema default
+    }
+  });
+
+  it("rejects a partition config with maxGroups out of range", () => {
+    const cfg = {
+      scoring: { mode: "partition", partition: { maxGroups: 99 } },
+      consensus: { minVotes: 2, confirmPct: 70, rejectPct: 70 },
+      display: { showExternalLinks: false, showAlternatives: false, showMetadataPanel: true },
+      import: { sourcePrefixFilter: false },
+    };
+    expect(campaignConfigSchema.safeParse(cfg).success).toBe(false);
+  });
+
   it("accepts a numeric config with valid thresholds (confirm > reject)", () => {
     const cfg = {
       scoring: { mode: "numeric", numeric: { min: 1, max: 5 } },
