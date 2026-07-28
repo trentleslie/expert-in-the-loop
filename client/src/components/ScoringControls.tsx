@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Slider } from "@/components/ui/slider";
 import { ThumbsUp, ThumbsDown, HelpCircle, Loader2 } from "lucide-react";
 import type { CampaignConfig } from "@shared/campaignConfig";
@@ -15,6 +16,9 @@ import type { CampaignConfig } from "@shared/campaignConfig";
 
 export type BinaryValue = "match" | "no_match" | "unsure";
 
+/** A member variable the reviewer can flag as not-belonging (exclusion mode). */
+export type ExclusionMember = { id: string; text: string };
+
 type ScoringConfig = CampaignConfig["scoring"];
 
 type ScoringControlsProps = {
@@ -29,6 +33,9 @@ type ScoringControlsProps = {
       // Numeric selection
       numericValue?: number | null;
       onNumericSelect: (value: number) => void;
+      // Exclusion selection: the members to review + the submit callback (excluded = flagged ids).
+      members?: ExclusionMember[];
+      onExclusionSelect?: (excluded: string[]) => void;
     }
 );
 
@@ -193,6 +200,85 @@ function NumericSlider({
   );
 }
 
+function ExclusionControls({
+  members,
+  onSubmit,
+  isSubmitting,
+}: {
+  members: ExclusionMember[];
+  onSubmit: (excluded: string[]) => void;
+  isSubmitting?: boolean;
+}) {
+  // member id -> flagged (does NOT belong). Default: nothing flagged ⇒ "one concept" (coherent).
+  const [flagged, setFlagged] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    setFlagged({});
+  }, [members]);
+
+  if (members.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground text-center" data-testid="exclusion-no-members">
+        No member variables to review (this pair has no <code>sourceMetadata.members</code>).
+      </p>
+    );
+  }
+
+  const flaggedCount = members.filter((m) => flagged[m.id]).length;
+
+  const submit = () => onSubmit(members.filter((m) => flagged[m.id]).map((m) => m.id));
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground text-center">
+        These variables were clustered into one concept. Check any that do NOT belong; leave all unchecked
+        if they are ONE concept.
+      </p>
+      <div className="space-y-2">
+        {members.map((m) => {
+          const isFlagged = !!flagged[m.id];
+          return (
+            <label
+              key={m.id}
+              className={`flex items-start gap-3 rounded-md border p-2 cursor-pointer ${
+                isFlagged ? "border-destructive bg-destructive/5" : ""
+              }`}
+              data-testid={`exclusion-member-${m.id}`}
+            >
+              <Checkbox
+                checked={isFlagged}
+                onCheckedChange={(c) => setFlagged((f) => ({ ...f, [m.id]: c === true }))}
+                disabled={isSubmitting}
+                className="mt-0.5 shrink-0"
+                data-testid={`exclusion-${m.id}-checkbox`}
+              />
+              <span className={`text-sm leading-snug ${isFlagged ? "line-through text-destructive" : ""}`}>
+                {m.text}
+              </span>
+            </label>
+          );
+        })}
+      </div>
+      <div className="flex items-center justify-center gap-4">
+        <span
+          className={`text-xs ${flaggedCount === 0 ? "text-muted-foreground" : "text-destructive font-medium"}`}
+          data-testid="exclusion-verdict"
+        >
+          {flaggedCount === 0 ? "One concept" : `Over-merge — ${flaggedCount} flagged`}
+        </span>
+        <Button
+          size="lg"
+          className="h-12 px-6"
+          onClick={submit}
+          disabled={isSubmitting}
+          data-testid="button-submit-exclusion"
+        >
+          {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : "Submit"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function ScoringControls({ scoring, isSubmitting, ...handlers }: ScoringControlsProps) {
   switch (scoring.mode) {
     case "binary":
@@ -211,6 +297,14 @@ export function ScoringControls({ scoring, isSubmitting, ...handlers }: ScoringC
           labels={scoring.numeric.labels}
           value={handlers.numericValue}
           onSelect={handlers.onNumericSelect}
+          isSubmitting={isSubmitting}
+        />
+      );
+    case "exclusion":
+      return (
+        <ExclusionControls
+          members={handlers.members ?? []}
+          onSubmit={handlers.onExclusionSelect ?? (() => {})}
           isSubmitting={isSubmitting}
         />
       );
