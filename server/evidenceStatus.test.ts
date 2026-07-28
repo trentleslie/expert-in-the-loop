@@ -12,6 +12,22 @@ const bin = (s: VoteForScoring["scoreBinary"]): VoteForScoring => ({
   scoreNumeric: null,
 });
 const num = (n: number): VoteForScoring => ({ scoreBinary: null, scoreNumeric: n });
+// An exclusion vote flagging `n` members (only whether ANY are flagged matters to consensus):
+// 0 ⇒ coherent, >0 ⇒ over-merge. `exclNull` = a vote with no exclusion recorded (not graded).
+const excl = (n: number): VoteForScoring => ({
+  scoreBinary: null,
+  scoreNumeric: null,
+  scoreExclusion: { excluded: Array.from({ length: n }, (_, i) => `m${i}`) },
+});
+const exclNull = (): VoteForScoring => ({ scoreBinary: null, scoreNumeric: null, scoreExclusion: null });
+
+function exclusionConfig(consensus: Partial<CampaignConfig["consensus"]> = {}): CampaignConfig {
+  return {
+    ...DEFAULT_CAMPAIGN_CONFIG,
+    scoring: { mode: "exclusion" },
+    consensus: { minVotes: 2, confirmPct: 70, rejectPct: 70, ...consensus },
+  };
+}
 
 function binaryConfig(consensus: Partial<CampaignConfig["consensus"]> = {}): CampaignConfig {
   return {
@@ -110,6 +126,34 @@ describe("computeEvidenceStatus — numeric", () => {
 
   it("mean exactly at reject threshold → expert_rejected (<=)", () => {
     expect(computeEvidenceStatus(numericConfig(), [num(2), num(2)])).toBe("expert_rejected");
+  });
+});
+
+describe("computeEvidenceStatus — exclusion", () => {
+  it("all nothing-flagged votes @ confirm 70 → expert_confirmed (coherent)", () => {
+    expect(computeEvidenceStatus(exclusionConfig(), [excl(0), excl(0)])).toBe("expert_confirmed");
+  });
+
+  it("all votes flagging ≥1 member @ reject 70 → expert_rejected (over-merge)", () => {
+    expect(computeEvidenceStatus(exclusionConfig(), [excl(1), excl(3)])).toBe("expert_rejected");
+  });
+
+  it("split coherent/over-merge below both thresholds → disputed", () => {
+    // 2 coherent + 1 over-merge of 3 = 67% coherent (< 70), 33% over-merge (< 70)
+    expect(computeEvidenceStatus(exclusionConfig(), [excl(0), excl(0), excl(2)])).toBe("disputed");
+  });
+
+  it("ungraded (null) votes stay in the denominator, contributing to neither side", () => {
+    // 2 coherent + 1 null of 3 = 67% coherent (< 70) → disputed, not confirmed
+    expect(computeEvidenceStatus(exclusionConfig(), [excl(0), excl(0), exclNull()])).toBe("disputed");
+    // 3 coherent + 1 null of 4 = 75% (>= 70) → confirmed
+    expect(
+      computeEvidenceStatus(exclusionConfig(), [excl(0), excl(0), excl(0), exclNull()]),
+    ).toBe("expert_confirmed");
+  });
+
+  it("respects the minVotes gate", () => {
+    expect(computeEvidenceStatus(exclusionConfig({ minVotes: 2 }), [excl(0)])).toBe("in_review");
   });
 });
 

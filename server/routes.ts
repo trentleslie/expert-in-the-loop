@@ -653,12 +653,28 @@ export async function registerRoutes(
       if (mode === "numeric" && (req.body.scoreNumeric == null || req.body.scoreBinary != null)) {
         return res.status(400).json({ message: "This campaign uses numeric scoring; provide scoreNumeric only." });
       }
+      if (mode === "exclusion") {
+        const e = req.body.scoreExclusion;
+        // A well-formed exclusion vote is { excluded: string[] } — the array MAY be empty
+        // (nothing flagged ⇒ coherent). Reject binary/numeric payloads on an exclusion campaign.
+        const wellFormed =
+          e != null &&
+          Array.isArray(e.excluded) &&
+          e.excluded.every((m: unknown) => typeof m === "string");
+        if (req.body.scoreBinary != null || req.body.scoreNumeric != null || !wellFormed) {
+          return res.status(400).json({
+            message:
+              "This campaign uses exclusion scoring; provide scoreExclusion.excluded (an array of member ids, possibly empty) only.",
+          });
+        }
+      }
 
       const voteData = insertVoteSchema.parse({
         pairId,
         userId,
         scoreBinary: mode === "binary" ? req.body.scoreBinary : null,
         scoreNumeric: mode === "numeric" ? req.body.scoreNumeric : null,
+        scoreExclusion: mode === "exclusion" ? req.body.scoreExclusion : null,
         scoringMode: mode,
         expertSelectedCode: req.body.expertSelectedCode ?? null,
         reviewerNotes: req.body.reviewerNotes ?? null,

@@ -16,6 +16,10 @@ import type { CampaignConfig, EvidenceStatus } from "@shared/campaignConfig";
 export interface VoteForScoring {
   scoreBinary: "match" | "no_match" | "unsure" | null;
   scoreNumeric: number | null;
+  // Exclusion mode: the member ids the reviewer flagged as NOT belonging.
+  // Empty ⇒ coherent (one concept); non-empty ⇒ an over-merge. null ⇒ not graded
+  // (like an ungraded partition/unsure binary vote). Absent for binary/numeric.
+  scoreExclusion?: { excluded: string[] } | null;
 }
 
 /**
@@ -54,6 +58,22 @@ export function computeEvidenceStatus(
       const noMatchPct = (noMatches / total) * 100;
       if (matchPct >= config.consensus.confirmPct) return "expert_confirmed";
       if (noMatchPct >= config.consensus.rejectPct) return "expert_rejected";
+      return "disputed";
+    }
+
+    if (config.scoring.mode === "exclusion") {
+      // Exclusion consensus reduces to the binary "is this ONE concept?": a vote is COHERENT iff the
+      // reviewer flagged NO members, an OVER-MERGE iff they flagged ≥1. Votes with no exclusion recorded
+      // (scoreExclusion == null) contribute to neither numerator (like an unsure binary vote); the
+      // denominator stays `total`, reusing confirmPct (coherent) / rejectPct (over-merge). NOTE: a graded
+      // vote CAN be an empty array (coherent), so "graded" is `!= null`, not a length check.
+      const graded = activeVotes.filter((v) => v.scoreExclusion != null);
+      const coherent = graded.filter((v) => v.scoreExclusion!.excluded.length === 0).length;
+      const overMerge = graded.filter((v) => v.scoreExclusion!.excluded.length > 0).length;
+      const coherentPct = (coherent / total) * 100;
+      const overMergePct = (overMerge / total) * 100;
+      if (coherentPct >= config.consensus.confirmPct) return "expert_confirmed";
+      if (overMergePct >= config.consensus.rejectPct) return "expert_rejected";
       return "disputed";
     }
 
@@ -106,7 +126,11 @@ export async function recomputeEvidenceStatusTx(
   await tx.execute(sql`SELECT 1 FROM ${pairs} WHERE ${pairs.id} = ${pairId} FOR UPDATE`);
 
   const active = await tx
-    .select({ scoreBinary: votes.scoreBinary, scoreNumeric: votes.scoreNumeric })
+    .select({
+      scoreBinary: votes.scoreBinary,
+      scoreNumeric: votes.scoreNumeric,
+      scoreExclusion: votes.scoreExclusion,
+    })
     .from(votes)
     .where(and(eq(votes.pairId, pairId), eq(votes.isActive, true)));
 
