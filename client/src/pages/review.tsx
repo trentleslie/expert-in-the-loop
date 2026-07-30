@@ -158,11 +158,28 @@ function EntityCard({
           </p>
           {displayMetadata.length > 0 && (
             <div className="flex flex-wrap gap-1">
-              {displayMetadata.map(([key, value]) => (
-                <Badge key={key} variant="secondary" className="text-xs max-w-full break-words whitespace-normal">
-                  {key}: {String(value)}
-                </Badge>
-              ))}
+              {displayMetadata.map(([key, value]) => {
+                const v = String(value);
+                const isUrl = /^https?:\/\/\S+$/.test(v);
+                return (
+                  <Badge key={key} variant="secondary" className="text-xs max-w-full break-words whitespace-normal">
+                    {key}:{" "}
+                    {isUrl ? (
+                      <a
+                        href={v}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary underline underline-offset-2 hover:opacity-80 break-all"
+                        data-testid={`link-metadata-${key}`}
+                      >
+                        {v}
+                      </a>
+                    ) : (
+                      v
+                    )}
+                  </Badge>
+                );
+              })}
             </div>
           )}
         </div>
