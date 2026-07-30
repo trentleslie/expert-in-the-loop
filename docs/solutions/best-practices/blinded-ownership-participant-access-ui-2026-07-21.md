@@ -63,6 +63,8 @@ roleById[c.id] = isAdmin ? "owner" : c.viewerRole ?? "participant";
 
 **5. Mirror server guards on the client, but keep the server authoritative.** The last-owner-remove guard is *disabled* on the client (`isLastOwner = isOwner && ownerCount <= 1` → button disabled, "Remove (last owner)") for UX, but authoritatively enforced server-side; the mutation's error handler still surfaces the server's "can't remove the last owner" 4xx. Defense in depth — the client guard is convenience, not security.
 
+> **Caveat (added 2026-07-27):** "keep the server authoritative" only protects you if the server tier is itself correct. On this same feature, the per-reviewer analytics endpoints (`/analytics/campaigns/:id/{reviewers,disagreements,skips}`) shipped guarded `requireCampaignAccess` (owner OR participant) when they should have been owner/admin only, leaking peers' score-linked notes to blinded participants — a *server-side* blinding leak that no amount of client mirroring would have caught. The lesson pairs with this one: audit that "who can access the campaign" and "who can see per-reviewer decision data" are distinct **server** tiers. See the security doc in Related below.
+
 ## Why This Matters
 
 - **A blinded app leaks through its newest surface.** Every new panel that renders server data is a fresh chance to leak provenance. A tested allow-list turns "did we remember to strip that field?" from a code-review judgment call into a red test.
@@ -81,5 +83,6 @@ Test-first (task order put the helper tests before the component): the `deriveRo
 
 ## Related
 
+- `docs/solutions/security-issues/campaign-access-control-blinding-leak-2026-07-27.md` — the server-side counterpart to guard #5: the analytics endpoints' own guards were too broad (a participant could read peers' score-linked notes), showing "keep the server authoritative" only holds once the server tier itself is audited. Also covers the ownerless-on-create gap on this feature.
 - `docs/solutions/logic-errors/patch-campaigns-details-status-guard-and-noop-update-2026-06-18.md` — same campaigns module, server-side guard footguns (the authoritative side of guard #5)
 - `docs/solutions/best-practices/clerk-auth-migration-express-react-2026-05-06.md` — auth/identity context these access surfaces sit on top of

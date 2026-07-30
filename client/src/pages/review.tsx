@@ -158,11 +158,37 @@ function EntityCard({
           </p>
           {displayMetadata.length > 0 && (
             <div className="flex flex-wrap gap-1">
-              {displayMetadata.map(([key, value]) => (
-                <Badge key={key} variant="secondary" className="text-xs max-w-full break-words whitespace-normal">
-                  {key}: {String(value)}
-                </Badge>
-              ))}
+              {displayMetadata.map(([key, value]) => {
+                const v = String(value);
+                // Only linkify complete http(s) URLs: require the URL to parse and carry a
+                // real hostname, so hostless values (e.g. "https://?query") stay plain text.
+                const isUrl = (() => {
+                  try {
+                    const u = new URL(v);
+                    return (u.protocol === "http:" || u.protocol === "https:") && u.hostname !== "";
+                  } catch {
+                    return false;
+                  }
+                })();
+                return (
+                  <Badge key={key} variant="secondary" className="text-xs max-w-full break-words whitespace-normal">
+                    {key}:{" "}
+                    {isUrl ? (
+                      <a
+                        href={v}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary underline underline-offset-2 hover:opacity-80 break-all"
+                        data-testid={`link-metadata-${key}`}
+                      >
+                        {v}
+                      </a>
+                    ) : (
+                      v
+                    )}
+                  </Badge>
+                );
+              })}
             </div>
           )}
         </div>
