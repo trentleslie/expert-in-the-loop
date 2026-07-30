@@ -160,7 +160,16 @@ function EntityCard({
             <div className="flex flex-wrap gap-1">
               {displayMetadata.map(([key, value]) => {
                 const v = String(value);
-                const isUrl = /^https?:\/\/\S+$/.test(v);
+                // Only linkify complete http(s) URLs: require the URL to parse and carry a
+                // real hostname, so hostless values (e.g. "https://?query") stay plain text.
+                const isUrl = (() => {
+                  try {
+                    const u = new URL(v);
+                    return (u.protocol === "http:" || u.protocol === "https:") && u.hostname !== "";
+                  } catch {
+                    return false;
+                  }
+                })();
                 return (
                   <Badge key={key} variant="secondary" className="text-xs max-w-full break-words whitespace-normal">
                     {key}:{" "}
