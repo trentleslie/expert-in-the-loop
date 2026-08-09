@@ -37,11 +37,22 @@ export function numericVoteLabel(scoring: Scoring | undefined, score: number): s
   return String(score);
 }
 
+/** Label for an exclusion vote: "One concept" (nothing flagged) or "Over-merge (N flagged)". */
+export function exclusionVoteLabel(excluded: string[] | null | undefined): string {
+  if (excluded == null) return "—";
+  return excluded.length === 0 ? "One concept" : `Over-merge (${excluded.length} flagged)`;
+}
+
 /** Label a stored vote regardless of mode. */
 export function voteLabel(
   scoring: Scoring | undefined,
-  vote: { scoreBinary?: BinaryChoice | null; scoreNumeric?: number | null },
+  vote: {
+    scoreBinary?: BinaryChoice | null;
+    scoreNumeric?: number | null;
+    scoreExclusion?: { excluded: string[] } | null;
+  },
 ): string {
+  if (vote.scoreExclusion != null) return exclusionVoteLabel(vote.scoreExclusion.excluded);
   if (vote.scoreNumeric != null) return numericVoteLabel(scoring, vote.scoreNumeric);
   if (vote.scoreBinary) return binaryVoteLabel(scoring, vote.scoreBinary);
   return "—";

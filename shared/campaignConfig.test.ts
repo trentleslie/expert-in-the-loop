@@ -6,6 +6,18 @@ describe("campaignConfigSchema", () => {
     expect(campaignConfigSchema.safeParse(DEFAULT_CAMPAIGN_CONFIG).success).toBe(true);
   });
 
+  it("accepts an exclusion config (no extra thresholds required)", () => {
+    const cfg = {
+      scoring: { mode: "exclusion" },
+      consensus: { minVotes: 2, confirmPct: 70, rejectPct: 70 },
+      display: { showExternalLinks: false, showAlternatives: false, showMetadataPanel: true },
+      import: { sourcePrefixFilter: false },
+    };
+    const parsed = campaignConfigSchema.safeParse(cfg);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.scoring.mode).toBe("exclusion");
+  });
+
   it("accepts a numeric config with valid thresholds (confirm > reject)", () => {
     const cfg = {
       scoring: { mode: "numeric", numeric: { min: 1, max: 5 } },

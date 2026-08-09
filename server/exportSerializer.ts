@@ -49,6 +49,11 @@ export type ExportRow = {
   positive_votes: number;
   negative_votes: number;
   unsure_votes: number;
+  // Exclusion campaigns: votes that flagged NO members (coherent — one concept) vs ≥1 (over-merge);
+  // 0 for binary/numeric. `excluded_members` carries each reviewer's flagged member ids (JSON), "" otherwise.
+  coherent_votes: number;
+  over_merge_votes: number;
+  excluded_members: string;
   // Binary agreement rate; "" (N/A) for numeric campaigns.
   positive_rate: string;
   // Mean of numeric scores; "" for binary campaigns.
@@ -66,6 +71,12 @@ export function buildExportRows(exportData: ExportItem[]): ExportRow[] {
     const numericScores = item.votes
       .map((v) => v.scoreNumeric)
       .filter((s): s is number => s != null);
+    const coherent = item.votes.filter(
+      (v) => v.scoreExclusion != null && v.scoreExclusion.excluded.length === 0,
+    ).length;
+    const overMerge = item.votes.filter(
+      (v) => v.scoreExclusion != null && v.scoreExclusion.excluded.length > 0,
+    ).length;
 
     return {
       pair_id: item.pair.id,
@@ -85,6 +96,12 @@ export function buildExportRows(exportData: ExportItem[]): ExportRow[] {
       positive_votes: positive,
       negative_votes: negative,
       unsure_votes: unsure,
+      coherent_votes: coherent,
+      over_merge_votes: overMerge,
+      excluded_members: item.votes
+        .filter((v) => v.scoreExclusion != null && v.scoreExclusion.excluded.length > 0)
+        .map((v) => JSON.stringify(v.scoreExclusion!.excluded))
+        .join(" | "),
       // Computed from BINARY votes only — empty (N/A) for numeric campaigns,
       // not a misleading "0.000". (For binary campaigns binaryTotal == vote
       // count, so this matches the prior positiveRate exactly.)

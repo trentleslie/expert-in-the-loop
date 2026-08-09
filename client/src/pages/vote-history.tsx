@@ -177,7 +177,7 @@ function EditVoteDialog({
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [scoringMode, setScoringMode] = useState<"binary" | "numeric">(
+  const [scoringMode, setScoringMode] = useState<"binary" | "numeric" | "exclusion">(
     vote?.scoringMode || "binary"
   );
   const [scoreBinary, setScoreBinary] = useState<"match" | "no_match" | "unsure" | null>(
@@ -205,6 +205,9 @@ function EditVoteDialog({
         scoringMode,
         scoreBinary: scoringMode === "binary" ? scoreBinary : null,
         scoreNumeric: scoringMode === "numeric" ? scoreNumeric : null,
+        // Exclusion selections are re-done in the Review page, not this compact dialog;
+        // pass the original flagged-members set through so a notes-only edit stays well-formed.
+        scoreExclusion: scoringMode === "exclusion" ? (vote.scoreExclusion ?? null) : null,
         reviewerNotes: reviewerNotes || null,
       });
     },

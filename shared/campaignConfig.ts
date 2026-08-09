@@ -78,8 +78,17 @@ const numericScoringSchema = z.object({
     }),
 });
 
+// Exclusion scoring: the reviewer flags a pair's member variables (source_metadata.members) that do
+// NOT belong to the concept, instead of casting one score. Each vote records the flagged member ids;
+// consensus reduces to the binary "is this ONE concept?" (nothing flagged ⇒ coherent ⇒ confirmed; any
+// member flagged ⇒ an over-merge ⇒ rejected), so it reuses `consensus.confirmPct` / `rejectPct` — no
+// extra thresholds and no config knobs. Which members were flagged is retained as the rich payload.
+const exclusionScoringSchema = z.object({
+  mode: z.literal("exclusion"),
+});
+
 const campaignConfigBaseSchema = z.object({
-  scoring: z.discriminatedUnion("mode", [binaryScoringSchema, numericScoringSchema]),
+  scoring: z.discriminatedUnion("mode", [binaryScoringSchema, numericScoringSchema, exclusionScoringSchema]),
   consensus: z.object({
     minVotes: z.number().int().min(1).default(2),
     confirmPct: z.number().min(0).max(100).default(70),
