@@ -223,6 +223,22 @@ function KeyboardShortcuts({ scoring }: { scoring: CampaignConfig["scoring"] }) 
     );
   }
 
+  if (scoring.mode === "partition") {
+    // Partition grouping is multi-step (no single-key vote); only Skip has a shortcut.
+    return (
+      <div className="flex items-center justify-center gap-6 py-3 text-xs text-muted-foreground flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <Keyboard className="w-3.5 h-3.5" />
+          <span>Keyboard shortcuts:</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">↓</kbd>
+          <span>Skip</span>
+        </div>
+      </div>
+    );
+  }
+
   const { labels } = scoring.binary;
   return (
     <div className="flex items-center justify-center gap-6 py-3 text-xs text-muted-foreground flex-wrap">
@@ -308,6 +324,9 @@ export default function ReviewPage() {
   } | {
     type: 'numeric';
     value: number;
+  } | {
+    type: 'partition';
+    value: string[][]; // the reviewer's grouping of member ids
   } | null>(null);
 
   const [pendingSkip, setPendingSkip] = useState(false);
@@ -333,18 +352,27 @@ export default function ReviewPage() {
     enabled: !!campaignId,
   });
 
+  // Partition mode: the member variables to group live in the pair's sourceMetadata.members.
+  const partitionMembers: { id: string; text: string }[] = Array.isArray(
+    (pairData?.pair?.sourceMetadata as { members?: unknown } | null)?.members,
+  )
+    ? (pairData!.pair!.sourceMetadata as { members: { id: string; text: string }[] }).members
+    : [];
+
   const voteMutation = useMutation({
-    mutationFn: async ({ pairId, scoreBinary, scoreNumeric, expertCode, notes, scoringMode }: {
+    mutationFn: async ({ pairId, scoreBinary, scoreNumeric, scorePartition, expertCode, notes, scoringMode }: {
       pairId: string;
       scoreBinary: "match" | "no_match" | "unsure" | null;
       scoreNumeric: number | null;
+      scorePartition: { groups: string[][] } | null;
       expertCode: string | null;
       notes: string;
-      scoringMode: "binary" | "numeric";
+      scoringMode: "binary" | "numeric" | "partition";
     }) => {
       return apiRequest("POST", `/api/pairs/${pairId}/vote`, {
         scoreBinary,
         scoreNumeric,
+        scorePartition,
         scoringMode,
         expertSelectedCode: expertCode,
         reviewerNotes: notes || null,
@@ -418,6 +446,7 @@ export default function ReviewPage() {
       pairId: pairData.pair.id,
       scoreBinary: value,
       scoreNumeric: null,
+      scorePartition: null,
       scoringMode: scoring.mode,
       expertCode: expertSelectedCode,
       notes: reviewerNotes,
@@ -430,6 +459,20 @@ export default function ReviewPage() {
       pairId: pairData.pair.id,
       scoreBinary: null,
       scoreNumeric: value,
+      scorePartition: null,
+      scoringMode: scoring.mode,
+      expertCode: expertSelectedCode,
+      notes: reviewerNotes,
+    });
+  }, [pairData?.pair, voteMutation, scoring.mode, expertSelectedCode, reviewerNotes]);
+
+  const submitPartitionVote = useCallback((groups: string[][]) => {
+    if (!pairData?.pair) return;
+    voteMutation.mutate({
+      pairId: pairData.pair.id,
+      scoreBinary: null,
+      scoreNumeric: null,
+      scorePartition: { groups },
       scoringMode: scoring.mode,
       expertCode: expertSelectedCode,
       notes: reviewerNotes,
@@ -453,6 +496,12 @@ export default function ReviewPage() {
     else submitNumericVote(score);
   }, [pairData?.pair, confirmBeforeSubmit, submitNumericVote]);
 
+  const handlePartitionVote = useCallback((groups: string[][]) => {
+    if (!pairData?.pair) return;
+    if (confirmBeforeSubmit) setPendingVote({ type: 'partition', value: groups });
+    else submitPartitionVote(groups);
+  }, [pairData?.pair, confirmBeforeSubmit, submitPartitionVote]);
+
   const handleSkip = useCallback(() => {
     if (!pairData?.pair) return;
     if (confirmBeforeSubmit) setPendingSkip(true);
@@ -466,9 +515,10 @@ export default function ReviewPage() {
   const confirmVote = useCallback(() => {
     if (!pendingVote || !pairData?.pair) return;
     if (pendingVote.type === 'binary') submitBinaryVote(pendingVote.value);
-    else submitNumericVote(pendingVote.value);
+    else if (pendingVote.type === 'numeric') submitNumericVote(pendingVote.value);
+    else submitPartitionVote(pendingVote.value);
     setPendingVote(null);
-  }, [pendingVote, pairData?.pair, submitBinaryVote, submitNumericVote]);
+  }, [pendingVote, pairData?.pair, submitBinaryVote, submitNumericVote, submitPartitionVote]);
 
   const confirmSkip = useCallback(() => {
     if (!pairData?.pair) return;
@@ -524,7 +574,7 @@ export default function ReviewPage() {
           handleNumericVote(numKey);
           return;
         }
-      } else {
+      } else if (scoring.mode === "binary") {
         // Binary mode: arrow keys and U for unsure
         if (e.key === "ArrowLeft") {
           e.preventDefault();
@@ -540,6 +590,7 @@ export default function ReviewPage() {
           return;
         }
       }
+      // Partition mode: no single-key vote shortcut (grouping is multi-step); only Skip (below).
 
       // Skip works in both modes
       if (e.key === "ArrowDown") {
@@ -828,6 +879,8 @@ export default function ReviewPage() {
                 onBinarySelect={handleBinaryVote}
                 numericValue={pendingVote?.type === "numeric" ? pendingVote.value : null}
                 onNumericSelect={handleNumericVote}
+                members={partitionMembers}
+                onPartitionSelect={handlePartitionVote}
               />
 
               <div className="flex justify-center">
@@ -880,13 +933,17 @@ export default function ReviewPage() {
                               ? scoring.binary.labels.negative
                               : scoring.binary.labels.neutral)
                         : pendingVote.value)
-                    : pendingVote
+                    : pendingVote?.type === 'numeric'
                       ? `${pendingVote.value}${
                           scoring.mode === 'numeric' && scoring.numeric.labels?.[String(pendingVote.value)]
                             ? ` - ${scoring.numeric.labels[String(pendingVote.value)]}`
                             : ''
                         }`
-                      : ''}
+                      : pendingVote?.type === 'partition'
+                        ? (pendingVote.value.length === 1
+                            ? 'One concept'
+                            : `Over-merge — ${pendingVote.value.length} concepts`)
+                        : ''}
                 </p>
                 <p className="text-sm text-muted-foreground">
                   <strong>Notes:</strong> {reviewerNotes.trim() || 'No notes'}

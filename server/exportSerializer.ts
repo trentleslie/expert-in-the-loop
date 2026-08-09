@@ -49,6 +49,11 @@ export type ExportRow = {
   positive_votes: number;
   negative_votes: number;
   unsure_votes: number;
+  // Partition campaigns: votes that grouped members into ONE concept (coherent) vs MORE (over-merge);
+  // 0 for binary/numeric. `partition_groupings` carries each reviewer's grouping (JSON), "" otherwise.
+  coherent_votes: number;
+  over_merge_votes: number;
+  partition_groupings: string;
   // Binary agreement rate; "" (N/A) for numeric campaigns.
   positive_rate: string;
   // Mean of numeric scores; "" for binary campaigns.
@@ -66,6 +71,8 @@ export function buildExportRows(exportData: ExportItem[]): ExportRow[] {
     const numericScores = item.votes
       .map((v) => v.scoreNumeric)
       .filter((s): s is number => s != null);
+    const coherent = item.votes.filter((v) => (v.scorePartition?.groups?.length ?? 0) === 1).length;
+    const overMerge = item.votes.filter((v) => (v.scorePartition?.groups?.length ?? 0) > 1).length;
 
     return {
       pair_id: item.pair.id,
@@ -85,6 +92,12 @@ export function buildExportRows(exportData: ExportItem[]): ExportRow[] {
       positive_votes: positive,
       negative_votes: negative,
       unsure_votes: unsure,
+      coherent_votes: coherent,
+      over_merge_votes: overMerge,
+      partition_groupings: item.votes
+        .filter((v) => v.scorePartition?.groups?.length)
+        .map((v) => JSON.stringify(v.scorePartition!.groups))
+        .join(" | "),
       // Computed from BINARY votes only — empty (N/A) for numeric campaigns,
       // not a misleading "0.000". (For binary campaigns binaryTotal == vote
       // count, so this matches the prior positiveRate exactly.)

@@ -9,7 +9,9 @@ export const userRoleEnum = pgEnum("user_role", ["reviewer", "admin"]);
 export const campaignStatusEnum = pgEnum("campaign_status", ["draft", "active", "completed", "archived"]);
 // NOTE: pairType is now free-text (the pair_type pgEnum was dropped in
 // migration-001). scoring_mode stays an enum (multi_criteria deferred — #5).
-export const scoringModeEnum = pgEnum("scoring_mode", ["binary", "numeric"]);
+// "partition" (reviewer groups a pair's members into concepts) added via
+// `ALTER TYPE scoring_mode ADD VALUE 'partition'` — see migrations/0002_*.
+export const scoringModeEnum = pgEnum("scoring_mode", ["binary", "numeric", "partition"]);
 export const binaryScoreEnum = pgEnum("binary_score", ["match", "no_match", "unsure"]);
 // Campaign membership role — access control (owner/participant). One row per
 // (campaign,user); `role` distinguishes management rights from plain access.
@@ -105,6 +107,11 @@ export const votes = pgTable("votes", {
   userId: varchar("user_id", { length: 255 }).references(() => users.id, { onUpdate: "cascade" }).notNull(),
   scoreBinary: binaryScoreEnum("score_binary"),
   scoreNumeric: integer("score_numeric"),
+  // Partition vote: the reviewer's grouping of the pair's members into distinct concepts.
+  // `groups` is a partition of the member ids (each member in exactly one group). Exactly one
+  // group ⇒ coherent; more than one ⇒ an over-merge. NULL for binary/numeric votes. Additive
+  // jsonb column (db:push-safe).
+  scorePartition: jsonb("score_partition").$type<{ groups: string[][] }>(),
   scoringMode: scoringModeEnum("scoring_mode").notNull(),
   // Expert selection: alternative LOINC code selected when reviewer disagrees
   expertSelectedCode: text("expert_selected_code"),
@@ -249,7 +256,11 @@ export const insertPairSchema = createInsertSchema(pairs).omit({
   createdAt: true,
 });
 
-export const insertVoteSchema = createInsertSchema(votes).omit({
+export const insertVoteSchema = createInsertSchema(votes, {
+  // drizzle-zod widens a $type'd jsonb column to a loose shape; pin it to the real
+  // partition contract so InsertVote.scorePartition matches the column's { groups: string[][] }.
+  scorePartition: z.object({ groups: z.array(z.array(z.string())) }).nullish(),
+}).omit({
   id: true,
   createdAt: true,
   updatedAt: true,

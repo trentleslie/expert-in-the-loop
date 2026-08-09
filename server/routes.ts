@@ -653,12 +653,29 @@ export async function registerRoutes(
       if (mode === "numeric" && (req.body.scoreNumeric == null || req.body.scoreBinary != null)) {
         return res.status(400).json({ message: "This campaign uses numeric scoring; provide scoreNumeric only." });
       }
+      if (mode === "partition") {
+        const p = req.body.scorePartition;
+        const wellFormed =
+          p != null &&
+          Array.isArray(p.groups) &&
+          p.groups.length > 0 &&
+          p.groups.every(
+            (g: unknown) => Array.isArray(g) && g.every((m) => typeof m === "string"),
+          );
+        if (req.body.scoreBinary != null || req.body.scoreNumeric != null || !wellFormed) {
+          return res.status(400).json({
+            message:
+              "This campaign uses partition scoring; provide scorePartition.groups (a non-empty grouping of member ids) only.",
+          });
+        }
+      }
 
       const voteData = insertVoteSchema.parse({
         pairId,
         userId,
         scoreBinary: mode === "binary" ? req.body.scoreBinary : null,
         scoreNumeric: mode === "numeric" ? req.body.scoreNumeric : null,
+        scorePartition: mode === "partition" ? req.body.scorePartition : null,
         scoringMode: mode,
         expertSelectedCode: req.body.expertSelectedCode ?? null,
         reviewerNotes: req.body.reviewerNotes ?? null,
