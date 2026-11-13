@@ -19,6 +19,7 @@ import { isCampaignJoinable } from "./campaignMembership";
 import { insertCampaignSchema, insertVoteSchema, updateCampaignDetailsSchema, type InsertPair, type Campaign } from "@shared/schema";
 import { RESOLUTION_LAYER_VALUES, campaignConfigSchema } from "@shared/campaignConfig";
 import { parseMembers } from "@shared/members";
+import { validatePartitionGroups } from "@shared/partitionVote";
 import { validateExcludedMembers } from "@shared/exclusionVote";
 import { z } from "zod";
 
@@ -655,6 +656,21 @@ export async function registerRoutes(
       if (mode === "numeric" && (req.body.scoreNumeric == null || req.body.scoreBinary != null)) {
         return res.status(400).json({ message: "This campaign uses numeric scoring; provide scoreNumeric only." });
       }
+      if (mode === "partition") {
+        if (req.body.scoreBinary != null || req.body.scoreNumeric != null) {
+          return res.status(400).json({ message: "This campaign uses partition scoring; provide scorePartition only." });
+        }
+        // The grouping must be a true partition of THIS pair's members — consensus classifies the
+        // vote by group count alone and the export emits the ids verbatim.
+        const problem = validatePartitionGroups(
+          req.body.scorePartition?.groups,
+          parseMembers(pair.sourceMetadata).map((m) => m.id),
+          config.scoring.partition.maxGroups,
+        );
+        if (problem) {
+          return res.status(400).json({ message: `Invalid scorePartition.groups: ${problem}.` });
+        }
+      }
       if (mode === "exclusion") {
         if (req.body.scoreBinary != null || req.body.scoreNumeric != null) {
           return res.status(400).json({ message: "This campaign uses exclusion scoring; provide scoreExclusion only." });
@@ -675,6 +691,7 @@ export async function registerRoutes(
         userId,
         scoreBinary: mode === "binary" ? req.body.scoreBinary : null,
         scoreNumeric: mode === "numeric" ? req.body.scoreNumeric : null,
+        scorePartition: mode === "partition" ? { groups: req.body.scorePartition.groups } : null,
         scoreExclusion: mode === "exclusion" ? { excluded: req.body.scoreExclusion.excluded } : null,
         scoringMode: mode,
         expertSelectedCode: req.body.expertSelectedCode ?? null,

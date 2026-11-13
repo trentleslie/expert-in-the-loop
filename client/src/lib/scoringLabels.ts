@@ -37,6 +37,13 @@ export function numericVoteLabel(scoring: Scoring | undefined, score: number): s
   return String(score);
 }
 
+/** Label for a partition vote: "One concept" (1 group) or "Over-merge (N concepts)". */
+export function partitionVoteLabel(groups: string[][] | null | undefined): string {
+  const n = groups?.length ?? 0;
+  if (n === 0) return "—";
+  return n === 1 ? "One concept" : `Over-merge (${n} concepts)`;
+}
+
 /** Label for an exclusion vote: "One concept" (nothing flagged) or "Over-merge (N flagged)". */
 export function exclusionVoteLabel(excluded: string[] | null | undefined): string {
   if (excluded == null) return "—";
@@ -49,9 +56,11 @@ export function voteLabel(
   vote: {
     scoreBinary?: BinaryChoice | null;
     scoreNumeric?: number | null;
+    scorePartition?: { groups: string[][] } | null;
     scoreExclusion?: { excluded: string[] } | null;
   },
 ): string {
+  if (vote.scorePartition?.groups) return partitionVoteLabel(vote.scorePartition.groups);
   if (vote.scoreExclusion != null) return exclusionVoteLabel(vote.scoreExclusion.excluded);
   if (vote.scoreNumeric != null) return numericVoteLabel(scoring, vote.scoreNumeric);
   if (vote.scoreBinary) return binaryVoteLabel(scoring, vote.scoreBinary);

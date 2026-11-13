@@ -49,10 +49,13 @@ export type ExportRow = {
   positive_votes: number;
   negative_votes: number;
   unsure_votes: number;
-  // Exclusion campaigns: votes that flagged NO members (coherent — one concept) vs ≥1 (over-merge);
-  // 0 for binary/numeric. `excluded_members` carries each reviewer's flagged member ids (JSON), "" otherwise.
+  // Partition / exclusion campaigns: votes judging the pair ONE concept (coherent: a single
+  // group, or nothing flagged) vs an over-merge (more than one group, or >=1 member flagged);
+  // 0 for binary/numeric. `partition_groupings` carries each reviewer's grouping and
+  // `excluded_members` each reviewer's flagged member ids (JSON), "" otherwise.
   coherent_votes: number;
   over_merge_votes: number;
+  partition_groupings: string;
   excluded_members: string;
   // Binary agreement rate; "" (N/A) for numeric campaigns.
   positive_rate: string;
@@ -71,11 +74,16 @@ export function buildExportRows(exportData: ExportItem[]): ExportRow[] {
     const numericScores = item.votes
       .map((v) => v.scoreNumeric)
       .filter((s): s is number => s != null);
+    // A vote belongs to exactly one mode, so the partition and exclusion tallies never overlap.
     const coherent = item.votes.filter(
-      (v) => v.scoreExclusion != null && v.scoreExclusion.excluded.length === 0,
+      (v) =>
+        (v.scorePartition?.groups?.length ?? 0) === 1 ||
+        (v.scoreExclusion != null && v.scoreExclusion.excluded.length === 0),
     ).length;
     const overMerge = item.votes.filter(
-      (v) => v.scoreExclusion != null && v.scoreExclusion.excluded.length > 0,
+      (v) =>
+        (v.scorePartition?.groups?.length ?? 0) > 1 ||
+        (v.scoreExclusion != null && v.scoreExclusion.excluded.length > 0),
     ).length;
 
     return {
@@ -98,6 +106,10 @@ export function buildExportRows(exportData: ExportItem[]): ExportRow[] {
       unsure_votes: unsure,
       coherent_votes: coherent,
       over_merge_votes: overMerge,
+      partition_groupings: item.votes
+        .filter((v) => v.scorePartition?.groups?.length)
+        .map((v) => JSON.stringify(v.scorePartition!.groups))
+        .join(" | "),
       excluded_members: item.votes
         .filter((v) => v.scoreExclusion != null && v.scoreExclusion.excluded.length > 0)
         .map((v) => JSON.stringify(v.scoreExclusion!.excluded))

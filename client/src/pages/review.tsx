@@ -310,8 +310,8 @@ function KeyboardShortcuts({ scoring }: { scoring: CampaignConfig["scoring"] }) 
     );
   }
 
-  if (scoring.mode === "exclusion") {
-    // Exclusion selection is multi-step (checkboxes); only Skip has a shortcut.
+  if (scoring.mode === "partition" || scoring.mode === "exclusion") {
+    // Partition grouping and exclusion selection are multi-step (no single-key vote); only Skip has a shortcut.
     return (
       <div className="flex items-center justify-center gap-6 py-3 text-xs text-muted-foreground flex-wrap">
         <div className="flex items-center gap-1.5">
@@ -412,6 +412,9 @@ export default function ReviewPage() {
     type: 'numeric';
     value: number;
   } | {
+    type: 'partition';
+    value: string[][]; // the reviewer's grouping of member ids
+  } | {
     type: 'exclusion';
     value: string[]; // the member ids the reviewer flagged as not-belonging
   } | null>(null);
@@ -447,10 +450,12 @@ export default function ReviewPage() {
     enabled: !!campaignId,
   });
 
-  // Exclusion mode: the member variables to review live in the pair's sourceMetadata.members.
-  // Parsed (ids guaranteed present + unique) and memoized on the metadata object.
+  // Partition and exclusion modes: the member variables live in the pair's sourceMetadata.members.
+  // Parsed (ids guaranteed present + unique) and memoized on the metadata object so the array
+  // identity is stable across rerenders.
   const pairSourceMetadata = pairData?.pair?.sourceMetadata;
-  const exclusionMembers = useMemo(() => parseMembers(pairSourceMetadata), [pairSourceMetadata]);
+  const partitionMembers = useMemo(() => parseMembers(pairSourceMetadata), [pairSourceMetadata]);
+  const exclusionMembers = partitionMembers;
   const exclusionExcludedIds = exclusionMembers.filter((m) => exclusionFlagged[m.id]).map((m) => m.id);
 
   // Clear the exclusion selection whenever the pair changes (a fresh pair starts all-unchecked).
@@ -459,18 +464,20 @@ export default function ReviewPage() {
   }, [pairData?.pair?.id]);
 
   const voteMutation = useMutation({
-    mutationFn: async ({ pairId, scoreBinary, scoreNumeric, scoreExclusion, expertCode, notes, scoringMode }: {
+    mutationFn: async ({ pairId, scoreBinary, scoreNumeric, scorePartition, scoreExclusion, expertCode, notes, scoringMode }: {
       pairId: string;
       scoreBinary: "match" | "no_match" | "unsure" | null;
       scoreNumeric: number | null;
+      scorePartition: { groups: string[][] } | null;
       scoreExclusion: { excluded: string[] } | null;
       expertCode: string | null;
       notes: string;
-      scoringMode: "binary" | "numeric" | "exclusion";
+      scoringMode: "binary" | "numeric" | "partition" | "exclusion";
     }) => {
       return apiRequest("POST", `/api/pairs/${pairId}/vote`, {
         scoreBinary,
         scoreNumeric,
+        scorePartition,
         scoreExclusion,
         scoringMode,
         expertSelectedCode: expertCode,
@@ -545,6 +552,7 @@ export default function ReviewPage() {
       pairId: pairData.pair.id,
       scoreBinary: value,
       scoreNumeric: null,
+      scorePartition: null,
       scoreExclusion: null,
       scoringMode: scoring.mode,
       expertCode: expertSelectedCode,
@@ -558,6 +566,21 @@ export default function ReviewPage() {
       pairId: pairData.pair.id,
       scoreBinary: null,
       scoreNumeric: value,
+      scorePartition: null,
+      scoreExclusion: null,
+      scoringMode: scoring.mode,
+      expertCode: expertSelectedCode,
+      notes: reviewerNotes,
+    });
+  }, [pairData?.pair, voteMutation, scoring.mode, expertSelectedCode, reviewerNotes]);
+
+  const submitPartitionVote = useCallback((groups: string[][]) => {
+    if (!pairData?.pair) return;
+    voteMutation.mutate({
+      pairId: pairData.pair.id,
+      scoreBinary: null,
+      scoreNumeric: null,
+      scorePartition: { groups },
       scoreExclusion: null,
       scoringMode: scoring.mode,
       expertCode: expertSelectedCode,
@@ -571,6 +594,7 @@ export default function ReviewPage() {
       pairId: pairData.pair.id,
       scoreBinary: null,
       scoreNumeric: null,
+      scorePartition: null,
       scoreExclusion: { excluded },
       scoringMode: scoring.mode,
       expertCode: expertSelectedCode,
@@ -595,6 +619,12 @@ export default function ReviewPage() {
     else submitNumericVote(score);
   }, [pairData?.pair, confirmBeforeSubmit, submitNumericVote]);
 
+  const handlePartitionVote = useCallback((groups: string[][]) => {
+    if (!pairData?.pair) return;
+    if (confirmBeforeSubmit) setPendingVote({ type: 'partition', value: groups });
+    else submitPartitionVote(groups);
+  }, [pairData?.pair, confirmBeforeSubmit, submitPartitionVote]);
+
   const handleExclusionSubmit = useCallback(() => {
     if (!pairData?.pair) return;
     // Read the lifted selection at submit time (the checkboxes live in the left entity card).
@@ -617,9 +647,10 @@ export default function ReviewPage() {
     if (!pendingVote || !pairData?.pair) return;
     if (pendingVote.type === 'binary') submitBinaryVote(pendingVote.value);
     else if (pendingVote.type === 'numeric') submitNumericVote(pendingVote.value);
+    else if (pendingVote.type === 'partition') submitPartitionVote(pendingVote.value);
     else submitExclusionVote(pendingVote.value);
     setPendingVote(null);
-  }, [pendingVote, pairData?.pair, submitBinaryVote, submitNumericVote, submitExclusionVote]);
+  }, [pendingVote, pairData?.pair, submitBinaryVote, submitNumericVote, submitPartitionVote, submitExclusionVote]);
 
   const confirmSkip = useCallback(() => {
     if (!pairData?.pair) return;
@@ -691,7 +722,7 @@ export default function ReviewPage() {
           return;
         }
       }
-      // Exclusion mode: no single-key vote shortcut (checkbox selection is multi-step); only Skip (below).
+      // Partition and exclusion modes: no single-key vote shortcut (selection is multi-step); only Skip (below).
 
       // Skip works in both modes
       if (e.key === "ArrowDown") {
@@ -995,15 +1026,20 @@ export default function ReviewPage() {
 
             <Separator />
 
-            {/* Voting controls (config-driven: binary, numeric, or exclusion) */}
+            {/* Voting controls (config-driven: binary, numeric, partition, or exclusion) */}
             <div className="space-y-4">
               <ScoringControls
+                // Remount per pair so in-progress control state (e.g. a partition grouping)
+                // never carries over to the next pair, even when member ids are identical.
+                key={pairData?.pair?.id}
                 scoring={scoring}
                 isSubmitting={isSubmitting}
                 binaryValue={pendingVote?.type === "binary" ? pendingVote.value : null}
                 onBinarySelect={handleBinaryVote}
                 numericValue={pendingVote?.type === "numeric" ? pendingVote.value : null}
                 onNumericSelect={handleNumericVote}
+                members={partitionMembers}
+                onPartitionSelect={handlePartitionVote}
                 exclusionMemberCount={exclusionMembers.length}
                 exclusionExcludedCount={exclusionExcludedIds.length}
                 onExclusionSubmit={handleExclusionSubmit}
@@ -1065,6 +1101,10 @@ export default function ReviewPage() {
                             ? ` - ${scoring.numeric.labels[String(pendingVote.value)]}`
                             : ''
                         }`
+                      : pendingVote?.type === 'partition'
+                        ? (pendingVote.value.length === 1
+                            ? 'One concept'
+                            : `Over-merge — ${pendingVote.value.length} concepts`)
                       : pendingVote?.type === 'exclusion'
                         ? (pendingVote.value.length === 0
                             ? 'One concept'

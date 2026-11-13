@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { ThumbsUp, ThumbsDown, HelpCircle, Loader2 } from "lucide-react";
 import type { CampaignConfig } from "@shared/campaignConfig";
+import type { PairMember } from "@shared/members";
 
 /**
  * Config-driven scoring controls for the review UI.
@@ -20,6 +21,9 @@ export type ExclusionMember = { id: string; text: string };
 
 type ScoringConfig = CampaignConfig["scoring"];
 
+/** A member variable the reviewer partitions into a concept group (partition mode). */
+export type PartitionMember = PairMember;
+
 type ScoringControlsProps = {
   scoring: ScoringConfig;
   isSubmitting?: boolean;
@@ -32,6 +36,9 @@ type ScoringControlsProps = {
       // Numeric selection
       numericValue?: number | null;
       onNumericSelect: (value: number) => void;
+      // Partition selection: the members to group + the submit callback (groups = a partition of ids).
+      members?: PartitionMember[];
+      onPartitionSelect: (groups: string[][]) => void;
       // Exclusion mode: selection state is lifted to the review page (checkboxes live in the
       // left entity card). These are a controlled readout + the submit trigger.
       exclusionMemberCount?: number;
@@ -39,6 +46,9 @@ type ScoringControlsProps = {
       onExclusionSubmit?: () => void;
     }
 );
+
+// Group labels A, B, C … (maxGroups <= 26, enforced by campaignConfig).
+const GROUP_LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
 // Threshold at/below which numeric scales render as a button row rather than a
 // slider. Larger ranges become unwieldy as buttons, so they get a slider.
@@ -201,6 +211,99 @@ function NumericSlider({
   );
 }
 
+function PartitionControls({
+  members,
+  maxGroups,
+  onSubmit,
+  isSubmitting,
+}: {
+  members: PartitionMember[];
+  maxGroups: number;
+  onSubmit: (groups: string[][]) => void;
+  isSubmitting?: boolean;
+}) {
+  // member id -> group index (0-based). Default: all in group 0 ⇒ "one concept" (coherent).
+  const [assign, setAssign] = useState<Record<string, number>>({});
+  // Reset only when the SET of members changes (a new pair), never on a parent rerender: keying
+  // on the array identity would wipe the reviewer's grouping every time the page rerenders.
+  const memberKey = JSON.stringify(members.map((m) => m.id));
+  useEffect(() => {
+    setAssign(Object.fromEntries(members.map((m) => [m.id, 0])));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [memberKey]);
+
+  if (members.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground text-center" data-testid="partition-no-members">
+        No member variables to group (this pair has no <code>sourceMetadata.members</code>).
+      </p>
+    );
+  }
+
+  // Show every group in use + one spare slot to split into (bounded by maxGroups).
+  const highest = Math.max(0, ...members.map((m) => assign[m.id] ?? 0));
+  const groupCount = Math.min(maxGroups, highest + 2);
+  const distinct = new Set(members.map((m) => assign[m.id] ?? 0)).size;
+
+  const submit = () => {
+    const byGroup = new Map<number, string[]>();
+    for (const m of members) {
+      const g = assign[m.id] ?? 0;
+      (byGroup.get(g) ?? byGroup.set(g, []).get(g)!).push(m.id);
+    }
+    onSubmit(Array.from(byGroup.values())); // groups with no members are never created
+  };
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground text-center">
+        Tag each variable with the concept it belongs to. Keep them all in group A if they are ONE concept;
+        move any that measure a different concept into another group.
+      </p>
+      <div className="space-y-2">
+        {members.map((m) => (
+          <div
+            key={m.id}
+            className="flex items-start gap-3 rounded-md border p-2"
+            data-testid={`partition-member-${m.id}`}
+          >
+            <div className="flex gap-1 flex-wrap pt-0.5 shrink-0">
+              {Array.from({ length: groupCount }).map((_, g) => (
+                <Button
+                  key={g}
+                  size="sm"
+                  variant={(assign[m.id] ?? 0) === g ? "default" : "outline"}
+                  className="h-7 w-7 p-0 text-xs font-semibold"
+                  onClick={() => setAssign((a) => ({ ...a, [m.id]: g }))}
+                  disabled={isSubmitting}
+                  data-testid={`partition-${m.id}-group-${g}`}
+                >
+                  {GROUP_LABELS[g] ?? g + 1}
+                </Button>
+              ))}
+            </div>
+            <span className="text-sm leading-snug">{m.text}</span>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-center gap-4">
+        <span className="text-xs text-muted-foreground" data-testid="partition-group-count">
+          {distinct === 1 ? "One concept" : `${distinct} distinct concepts`}
+        </span>
+        <Button
+          size="lg"
+          className="h-12 px-6"
+          onClick={submit}
+          disabled={isSubmitting}
+          data-testid="button-submit-partition"
+        >
+          {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : "Submit grouping"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * The exclusion verdict + Submit bar. The per-member checkboxes live in the review page's
  * LEFT entity card (the approved two-column layout), so selection state is lifted there; this
@@ -265,6 +368,15 @@ export function ScoringControls({ scoring, isSubmitting, ...handlers }: ScoringC
           labels={scoring.numeric.labels}
           value={handlers.numericValue}
           onSelect={handlers.onNumericSelect}
+          isSubmitting={isSubmitting}
+        />
+      );
+    case "partition":
+      return (
+        <PartitionControls
+          members={handlers.members ?? []}
+          maxGroups={scoring.partition.maxGroups}
+          onSubmit={handlers.onPartitionSelect}
           isSubmitting={isSubmitting}
         />
       );

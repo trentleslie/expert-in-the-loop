@@ -181,7 +181,7 @@ function EditVoteDialog({
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [scoringMode, setScoringMode] = useState<"binary" | "numeric" | "exclusion">(
+  const [scoringMode, setScoringMode] = useState<"binary" | "numeric" | "partition" | "exclusion">(
     vote?.scoringMode || "binary"
   );
   const [scoreBinary, setScoreBinary] = useState<"match" | "no_match" | "unsure" | null>(
@@ -217,6 +217,9 @@ function EditVoteDialog({
         scoringMode,
         scoreBinary: scoringMode === "binary" ? scoreBinary : null,
         scoreNumeric: scoringMode === "numeric" ? scoreNumeric : null,
+        // Partition groupings are re-done in the Review page, not this compact dialog;
+        // pass the original grouping through so a notes-only edit stays well-formed.
+        scorePartition: scoringMode === "partition" ? (vote.scorePartition ?? null) : null,
         scoreExclusion: scoringMode === "exclusion" ? { excluded: excludedIds } : null,
         reviewerNotes: reviewerNotes || null,
       });
@@ -347,6 +350,8 @@ function EditVoteDialog({
                   numericValue={scoreNumeric}
                   onNumericSelect={setScoreNumeric}
                   onBinarySelect={() => {}}
+                  members={[]}
+                  onPartitionSelect={() => {}}
                 />
               ) : (
                 // Fallback only when the campaign config hasn't loaded.
