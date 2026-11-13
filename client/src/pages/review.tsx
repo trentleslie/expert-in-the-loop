@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -49,6 +49,7 @@ import {
 import type { Campaign, Pair } from "@shared/schema";
 import type { CampaignConfig } from "@shared/campaignConfig";
 import { DEFAULT_CAMPAIGN_CONFIG } from "@shared/campaignConfig";
+import { parseMembers } from "@shared/members";
 
 type NextPairResponse = {
   pair: Pair | null;
@@ -421,11 +422,9 @@ export default function ReviewPage() {
   });
 
   // Exclusion mode: the member variables to review live in the pair's sourceMetadata.members.
-  const exclusionMembers: { id: string; text: string }[] = Array.isArray(
-    (pairData?.pair?.sourceMetadata as { members?: unknown } | null)?.members,
-  )
-    ? (pairData!.pair!.sourceMetadata as { members: { id: string; text: string }[] }).members
-    : [];
+  // Parsed (ids guaranteed present + unique) and memoized on the metadata object.
+  const pairSourceMetadata = pairData?.pair?.sourceMetadata;
+  const exclusionMembers = useMemo(() => parseMembers(pairSourceMetadata), [pairSourceMetadata]);
   const exclusionExcludedIds = exclusionMembers.filter((m) => exclusionFlagged[m.id]).map((m) => m.id);
 
   // Clear the exclusion selection whenever the pair changes (a fresh pair starts all-unchecked).

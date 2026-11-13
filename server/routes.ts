@@ -18,6 +18,8 @@ import { resolveMigrationEmail } from "./authMigration";
 import { isCampaignJoinable } from "./campaignMembership";
 import { insertCampaignSchema, insertVoteSchema, updateCampaignDetailsSchema, type InsertPair, type Campaign } from "@shared/schema";
 import { RESOLUTION_LAYER_VALUES, campaignConfigSchema } from "@shared/campaignConfig";
+import { parseMembers } from "@shared/members";
+import { validateExcludedMembers } from "@shared/exclusionVote";
 import { z } from "zod";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -654,18 +656,17 @@ export async function registerRoutes(
         return res.status(400).json({ message: "This campaign uses numeric scoring; provide scoreNumeric only." });
       }
       if (mode === "exclusion") {
-        const e = req.body.scoreExclusion;
-        // A well-formed exclusion vote is { excluded: string[] } — the array MAY be empty
-        // (nothing flagged ⇒ coherent). Reject binary/numeric payloads on an exclusion campaign.
-        const wellFormed =
-          e != null &&
-          Array.isArray(e.excluded) &&
-          e.excluded.every((m: unknown) => typeof m === "string");
-        if (req.body.scoreBinary != null || req.body.scoreNumeric != null || !wellFormed) {
-          return res.status(400).json({
-            message:
-              "This campaign uses exclusion scoring; provide scoreExclusion.excluded (an array of member ids, possibly empty) only.",
-          });
+        if (req.body.scoreBinary != null || req.body.scoreNumeric != null) {
+          return res.status(400).json({ message: "This campaign uses exclusion scoring; provide scoreExclusion only." });
+        }
+        // Flagged ids must be unique members of THIS pair (the array may be empty: nothing
+        // flagged = coherent) — they are stored verbatim and surface in history and exports.
+        const problem = validateExcludedMembers(
+          req.body.scoreExclusion?.excluded,
+          parseMembers(pair.sourceMetadata).map((m) => m.id),
+        );
+        if (problem) {
+          return res.status(400).json({ message: `Invalid scoreExclusion.excluded: ${problem}.` });
         }
       }
 
@@ -674,7 +675,7 @@ export async function registerRoutes(
         userId,
         scoreBinary: mode === "binary" ? req.body.scoreBinary : null,
         scoreNumeric: mode === "numeric" ? req.body.scoreNumeric : null,
-        scoreExclusion: mode === "exclusion" ? req.body.scoreExclusion : null,
+        scoreExclusion: mode === "exclusion" ? { excluded: req.body.scoreExclusion.excluded } : null,
         scoringMode: mode,
         expertSelectedCode: req.body.expertSelectedCode ?? null,
         reviewerNotes: req.body.reviewerNotes ?? null,
