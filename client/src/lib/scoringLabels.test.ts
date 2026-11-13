@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { binaryVoteLabel, numericVoteLabel, partitionVoteLabel, voteLabel } from "./scoringLabels";
+import {
+  binaryVoteLabel,
+  numericVoteLabel,
+  partitionVoteLabel,
+  exclusionVoteLabel,
+  voteLabel,
+} from "./scoringLabels";
 import type { CampaignConfig } from "@shared/campaignConfig";
 
 const binary = (pos = "Yes", neg = "No", neu = "Maybe"): CampaignConfig["scoring"] => ({
@@ -44,6 +50,14 @@ describe("partitionVoteLabel", () => {
   });
 });
 
+describe("exclusionVoteLabel", () => {
+  it("labels nothing-flagged as coherent and any-flagged as an over-merge", () => {
+    expect(exclusionVoteLabel([])).toBe("One concept");
+    expect(exclusionVoteLabel(["a", "b"])).toBe("Over-merge (2 flagged)");
+    expect(exclusionVoteLabel(null)).toBe("—");
+  });
+});
+
 describe("voteLabel", () => {
   it("routes by which score is present", () => {
     expect(voteLabel(binary("Same", "Diff", "?"), { scoreBinary: "match", scoreNumeric: null })).toBe("Same");
@@ -55,5 +69,11 @@ describe("voteLabel", () => {
     expect(
       voteLabel(undefined, { scoreBinary: null, scoreNumeric: null, scorePartition: { groups: [["a"], ["b"]] } }),
     ).toBe("Over-merge (2 concepts)");
+  });
+
+  it("routes an exclusion vote to the exclusion label", () => {
+    expect(
+      voteLabel(undefined, { scoreBinary: null, scoreNumeric: null, scoreExclusion: { excluded: ["a", "b"] } }),
+    ).toBe("Over-merge (2 flagged)");
   });
 });

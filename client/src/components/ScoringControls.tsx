@@ -16,6 +16,9 @@ import type { PairMember } from "@shared/members";
 
 export type BinaryValue = "match" | "no_match" | "unsure";
 
+/** A member variable the reviewer can flag as not-belonging (exclusion mode). */
+export type ExclusionMember = { id: string; text: string };
+
 type ScoringConfig = CampaignConfig["scoring"];
 
 /** A member variable the reviewer partitions into a concept group (partition mode). */
@@ -36,6 +39,11 @@ type ScoringControlsProps = {
       // Partition selection: the members to group + the submit callback (groups = a partition of ids).
       members?: PartitionMember[];
       onPartitionSelect: (groups: string[][]) => void;
+      // Exclusion mode: selection state is lifted to the review page (checkboxes live in the
+      // left entity card). These are a controlled readout + the submit trigger.
+      exclusionMemberCount?: number;
+      exclusionExcludedCount?: number;
+      onExclusionSubmit?: () => void;
     }
 );
 
@@ -296,6 +304,52 @@ function PartitionControls({
   );
 }
 
+/**
+ * The exclusion verdict + Submit bar. The per-member checkboxes live in the review page's
+ * LEFT entity card (the approved two-column layout), so selection state is lifted there; this
+ * control is a thin, fully-controlled readout of that state. `memberCount === 0` ⇒ nothing to
+ * submit (a degenerate pair or the admin preview).
+ */
+function ExclusionControls({
+  memberCount,
+  excludedCount,
+  onSubmit,
+  isSubmitting,
+}: {
+  memberCount: number;
+  excludedCount: number;
+  onSubmit: () => void;
+  isSubmitting?: boolean;
+}) {
+  if (memberCount === 0) {
+    return (
+      <p className="text-sm text-muted-foreground text-center" data-testid="exclusion-no-members">
+        No member variables to review (this pair has no <code>sourceMetadata.members</code>).
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-center gap-4">
+      <span
+        className={`text-sm ${excludedCount === 0 ? "text-muted-foreground" : "text-destructive font-medium"}`}
+        data-testid="exclusion-verdict"
+      >
+        {excludedCount === 0 ? "One concept" : `Over-merge — ${excludedCount} flagged`}
+      </span>
+      <Button
+        size="lg"
+        className="h-12 px-6"
+        onClick={onSubmit}
+        disabled={isSubmitting}
+        data-testid="button-submit-exclusion"
+      >
+        {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : "Submit"}
+      </Button>
+    </div>
+  );
+}
+
 export function ScoringControls({ scoring, isSubmitting, ...handlers }: ScoringControlsProps) {
   switch (scoring.mode) {
     case "binary":
@@ -323,6 +377,15 @@ export function ScoringControls({ scoring, isSubmitting, ...handlers }: ScoringC
           members={handlers.members ?? []}
           maxGroups={scoring.partition.maxGroups}
           onSubmit={handlers.onPartitionSelect}
+          isSubmitting={isSubmitting}
+        />
+      );
+    case "exclusion":
+      return (
+        <ExclusionControls
+          memberCount={handlers.exclusionMemberCount ?? 0}
+          excludedCount={handlers.exclusionExcludedCount ?? 0}
+          onSubmit={handlers.onExclusionSubmit ?? (() => {})}
           isSubmitting={isSubmitting}
         />
       );

@@ -20,6 +20,7 @@ import { insertCampaignSchema, insertVoteSchema, updateCampaignDetailsSchema, ty
 import { RESOLUTION_LAYER_VALUES, campaignConfigSchema } from "@shared/campaignConfig";
 import { parseMembers } from "@shared/members";
 import { validatePartitionGroups } from "@shared/partitionVote";
+import { validateExcludedMembers } from "@shared/exclusionVote";
 import { z } from "zod";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -670,6 +671,20 @@ export async function registerRoutes(
           return res.status(400).json({ message: `Invalid scorePartition.groups: ${problem}.` });
         }
       }
+      if (mode === "exclusion") {
+        if (req.body.scoreBinary != null || req.body.scoreNumeric != null) {
+          return res.status(400).json({ message: "This campaign uses exclusion scoring; provide scoreExclusion only." });
+        }
+        // Flagged ids must be unique members of THIS pair (the array may be empty: nothing
+        // flagged = coherent) — they are stored verbatim and surface in history and exports.
+        const problem = validateExcludedMembers(
+          req.body.scoreExclusion?.excluded,
+          parseMembers(pair.sourceMetadata).map((m) => m.id),
+        );
+        if (problem) {
+          return res.status(400).json({ message: `Invalid scoreExclusion.excluded: ${problem}.` });
+        }
+      }
 
       const voteData = insertVoteSchema.parse({
         pairId,
@@ -677,6 +692,7 @@ export async function registerRoutes(
         scoreBinary: mode === "binary" ? req.body.scoreBinary : null,
         scoreNumeric: mode === "numeric" ? req.body.scoreNumeric : null,
         scorePartition: mode === "partition" ? { groups: req.body.scorePartition.groups } : null,
+        scoreExclusion: mode === "exclusion" ? { excluded: req.body.scoreExclusion.excluded } : null,
         scoringMode: mode,
         expertSelectedCode: req.body.expertSelectedCode ?? null,
         reviewerNotes: req.body.reviewerNotes ?? null,

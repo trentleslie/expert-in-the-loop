@@ -49,11 +49,14 @@ export type ExportRow = {
   positive_votes: number;
   negative_votes: number;
   unsure_votes: number;
-  // Partition campaigns: votes that grouped members into ONE concept (coherent) vs MORE (over-merge);
-  // 0 for binary/numeric. `partition_groupings` carries each reviewer's grouping (JSON), "" otherwise.
+  // Partition / exclusion campaigns: votes judging the pair ONE concept (coherent: a single
+  // group, or nothing flagged) vs an over-merge (more than one group, or >=1 member flagged);
+  // 0 for binary/numeric. `partition_groupings` carries each reviewer's grouping and
+  // `excluded_members` each reviewer's flagged member ids (JSON), "" otherwise.
   coherent_votes: number;
   over_merge_votes: number;
   partition_groupings: string;
+  excluded_members: string;
   // Binary agreement rate; "" (N/A) for numeric campaigns.
   positive_rate: string;
   // Mean of numeric scores; "" for binary campaigns.
@@ -71,8 +74,17 @@ export function buildExportRows(exportData: ExportItem[]): ExportRow[] {
     const numericScores = item.votes
       .map((v) => v.scoreNumeric)
       .filter((s): s is number => s != null);
-    const coherent = item.votes.filter((v) => (v.scorePartition?.groups?.length ?? 0) === 1).length;
-    const overMerge = item.votes.filter((v) => (v.scorePartition?.groups?.length ?? 0) > 1).length;
+    // A vote belongs to exactly one mode, so the partition and exclusion tallies never overlap.
+    const coherent = item.votes.filter(
+      (v) =>
+        (v.scorePartition?.groups?.length ?? 0) === 1 ||
+        (v.scoreExclusion != null && v.scoreExclusion.excluded.length === 0),
+    ).length;
+    const overMerge = item.votes.filter(
+      (v) =>
+        (v.scorePartition?.groups?.length ?? 0) > 1 ||
+        (v.scoreExclusion != null && v.scoreExclusion.excluded.length > 0),
+    ).length;
 
     return {
       pair_id: item.pair.id,
@@ -97,6 +109,10 @@ export function buildExportRows(exportData: ExportItem[]): ExportRow[] {
       partition_groupings: item.votes
         .filter((v) => v.scorePartition?.groups?.length)
         .map((v) => JSON.stringify(v.scorePartition!.groups))
+        .join(" | "),
+      excluded_members: item.votes
+        .filter((v) => v.scoreExclusion != null && v.scoreExclusion.excluded.length > 0)
+        .map((v) => JSON.stringify(v.scoreExclusion!.excluded))
         .join(" | "),
       // Computed from BINARY votes only — empty (N/A) for numeric campaigns,
       // not a misleading "0.000". (For binary campaigns binaryTotal == vote

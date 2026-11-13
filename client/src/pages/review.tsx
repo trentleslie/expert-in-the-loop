@@ -4,6 +4,7 @@ import { useParams, useLocation } from "wouter";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
@@ -112,6 +113,7 @@ function EntityCard({
   id,
   metadata,
   display,
+  badgeLabel,
 }: {
   type: "source" | "target";
   text: string;
@@ -119,6 +121,9 @@ function EntityCard({
   id: string;
   metadata?: Record<string, unknown> | null;
   display: CampaignConfig["display"];
+  // Overrides the default uppercase {type} badge text (used by the exclusion anchor card,
+  // which labels the badge from targetDataset). Other modes leave it undefined → "SOURCE"/"TARGET".
+  badgeLabel?: string;
 }) {
   // Suggested alternatives are now just ordinary metadata columns (the admin
   // chooses which to display) — no special parsing. The reviewer types their
@@ -132,7 +137,7 @@ function EntityCard({
       <CardHeader className="pb-3 flex-shrink-0">
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="text-xs font-medium uppercase tracking-wide" data-testid={`badge-entity-type-${type}`}>
-            {type}
+            {badgeLabel ?? type}
           </Badge>
           <span className="text-sm text-muted-foreground truncate" data-testid={`text-dataset-${type}`}>
             {dataset}
@@ -159,14 +164,121 @@ function EntityCard({
           </p>
           {displayMetadata.length > 0 && (
             <div className="flex flex-wrap gap-1">
-              {displayMetadata.map(([key, value]) => (
-                <Badge key={key} variant="secondary" className="text-xs max-w-full break-words whitespace-normal">
-                  {key}: {String(value)}
-                </Badge>
-              ))}
+              {displayMetadata.map(([key, value]) => {
+                const v = String(value);
+                // Only linkify complete http(s) URLs: require the URL to parse and carry a
+                // real hostname, so hostless values (e.g. "https://?query") stay plain text.
+                const isUrl = (() => {
+                  try {
+                    const u = new URL(v);
+                    return (u.protocol === "http:" || u.protocol === "https:") && u.hostname !== "";
+                  } catch {
+                    return false;
+                  }
+                })();
+                return (
+                  <Badge key={key} variant="secondary" className="text-xs max-w-full break-words whitespace-normal">
+                    {key}:{" "}
+                    {isUrl ? (
+                      <a
+                        href={v}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary underline underline-offset-2 hover:opacity-80 break-all"
+                        data-testid={`link-metadata-${key}`}
+                      >
+                        {v}
+                      </a>
+                    ) : (
+                      v
+                    )}
+                  </Badge>
+                );
+              })}
             </div>
           )}
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Badge text for the exclusion anchor (right) card, derived from the pair's targetDataset.
+ * The current campaign packs AI-proposed concepts as targetDataset "proposed_concept" (targetText =
+ * the concept description), NOT a CDE — so the badge must not say "CDE" there. A CDE-like dataset
+ * → "Matched CDE"; anything else → a humanized dataset; empty → "Anchor".
+ */
+function anchorBadgeLabel(dataset: string | null | undefined): string {
+  const raw = (dataset ?? "").trim();
+  if (!raw) return "Anchor";
+  const d = raw.toLowerCase();
+  if (d === "proposed_concept") return "Proposed concept";
+  if (d.includes("cde")) return "Matched CDE";
+  const spaced = raw.replace(/[_-]+/g, " ").trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/**
+ * Exclusion mode's LEFT card: the pair's member variables (sourceMetadata.members), each with a
+ * checkbox. Checked = "does NOT belong" (red-tinted row). Selection state is owned by the review
+ * page (lifted) so the below-cards Submit/verdict read the same set.
+ */
+function ExclusionMembersCard({
+  members,
+  flagged,
+  onToggle,
+  disabled,
+}: {
+  members: { id: string; text: string }[];
+  flagged: Record<string, boolean>;
+  onToggle: (id: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Card className="border-card-border h-full flex flex-col" data-testid="card-exclusion-members">
+      <CardHeader className="pb-3 flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="text-xs font-medium uppercase tracking-wide" data-testid="badge-exclusion-members">
+            Variables in this concept · {members.length}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="flex-1 flex flex-col min-h-0">
+        {members.length === 0 ? (
+          <p className="text-sm text-muted-foreground" data-testid="exclusion-no-members">
+            No member variables to review (this pair has no <code>sourceMetadata.members</code>).
+          </p>
+        ) : (
+          <div className="space-y-2 overflow-y-auto max-h-[50vh]">
+            {members.map((m) => {
+              const isFlagged = !!flagged[m.id];
+              return (
+                <label
+                  key={m.id}
+                  className={`flex items-start gap-3 rounded-md border p-2 cursor-pointer ${
+                    isFlagged ? "border-destructive bg-destructive/5" : "border-border"
+                  }`}
+                  data-testid={`exclusion-member-${m.id}`}
+                >
+                  <Checkbox
+                    checked={isFlagged}
+                    onCheckedChange={() => onToggle(m.id)}
+                    disabled={disabled}
+                    className="mt-0.5 shrink-0"
+                    data-testid={`exclusion-checkbox-${m.id}`}
+                  />
+                  <span className={`text-sm leading-snug ${isFlagged ? "line-through text-destructive" : ""}`}>
+                    {m.text}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground mt-3 pt-3 border-t border-border">
+          Check any variable that does NOT belong to this concept; leave all unchecked if they are ONE concept.
+        </p>
       </CardContent>
     </Card>
   );
@@ -198,8 +310,8 @@ function KeyboardShortcuts({ scoring }: { scoring: CampaignConfig["scoring"] }) 
     );
   }
 
-  if (scoring.mode === "partition") {
-    // Partition grouping is multi-step (no single-key vote); only Skip has a shortcut.
+  if (scoring.mode === "partition" || scoring.mode === "exclusion") {
+    // Partition grouping and exclusion selection are multi-step (no single-key vote); only Skip has a shortcut.
     return (
       <div className="flex items-center justify-center gap-6 py-3 text-xs text-muted-foreground flex-wrap">
         <div className="flex items-center gap-1.5">
@@ -302,9 +414,20 @@ export default function ReviewPage() {
   } | {
     type: 'partition';
     value: string[][]; // the reviewer's grouping of member ids
+  } | {
+    type: 'exclusion';
+    value: string[]; // the member ids the reviewer flagged as not-belonging
   } | null>(null);
 
   const [pendingSkip, setPendingSkip] = useState(false);
+
+  // Exclusion mode: which member ids the reviewer has flagged as NOT belonging. Lifted here (not
+  // inside ScoringControls) because the checkboxes live in the LEFT entity card while the verdict +
+  // Submit live below — both read this one set. Reset when the pair changes (see effect below).
+  const [exclusionFlagged, setExclusionFlagged] = useState<Record<string, boolean>>({});
+  const toggleExclusion = useCallback((id: string) => {
+    setExclusionFlagged((f) => ({ ...f, [id]: !f[id] }));
+  }, []);
 
   const { data: campaign } = useQuery<Campaign>({
     queryKey: [`/api/campaigns/${campaignId}`, "detail", campaignId],
@@ -327,25 +450,35 @@ export default function ReviewPage() {
     enabled: !!campaignId,
   });
 
-  // Partition mode: the member variables to group live in the pair's sourceMetadata.members.
-  // Memoized on the metadata object so the array identity is stable across rerenders.
+  // Partition and exclusion modes: the member variables live in the pair's sourceMetadata.members.
+  // Parsed (ids guaranteed present + unique) and memoized on the metadata object so the array
+  // identity is stable across rerenders.
   const pairSourceMetadata = pairData?.pair?.sourceMetadata;
   const partitionMembers = useMemo(() => parseMembers(pairSourceMetadata), [pairSourceMetadata]);
+  const exclusionMembers = partitionMembers;
+  const exclusionExcludedIds = exclusionMembers.filter((m) => exclusionFlagged[m.id]).map((m) => m.id);
+
+  // Clear the exclusion selection whenever the pair changes (a fresh pair starts all-unchecked).
+  useEffect(() => {
+    setExclusionFlagged({});
+  }, [pairData?.pair?.id]);
 
   const voteMutation = useMutation({
-    mutationFn: async ({ pairId, scoreBinary, scoreNumeric, scorePartition, expertCode, notes, scoringMode }: {
+    mutationFn: async ({ pairId, scoreBinary, scoreNumeric, scorePartition, scoreExclusion, expertCode, notes, scoringMode }: {
       pairId: string;
       scoreBinary: "match" | "no_match" | "unsure" | null;
       scoreNumeric: number | null;
       scorePartition: { groups: string[][] } | null;
+      scoreExclusion: { excluded: string[] } | null;
       expertCode: string | null;
       notes: string;
-      scoringMode: "binary" | "numeric" | "partition";
+      scoringMode: "binary" | "numeric" | "partition" | "exclusion";
     }) => {
       return apiRequest("POST", `/api/pairs/${pairId}/vote`, {
         scoreBinary,
         scoreNumeric,
         scorePartition,
+        scoreExclusion,
         scoringMode,
         expertSelectedCode: expertCode,
         reviewerNotes: notes || null,
@@ -420,6 +553,7 @@ export default function ReviewPage() {
       scoreBinary: value,
       scoreNumeric: null,
       scorePartition: null,
+      scoreExclusion: null,
       scoringMode: scoring.mode,
       expertCode: expertSelectedCode,
       notes: reviewerNotes,
@@ -433,6 +567,7 @@ export default function ReviewPage() {
       scoreBinary: null,
       scoreNumeric: value,
       scorePartition: null,
+      scoreExclusion: null,
       scoringMode: scoring.mode,
       expertCode: expertSelectedCode,
       notes: reviewerNotes,
@@ -446,6 +581,21 @@ export default function ReviewPage() {
       scoreBinary: null,
       scoreNumeric: null,
       scorePartition: { groups },
+      scoreExclusion: null,
+      scoringMode: scoring.mode,
+      expertCode: expertSelectedCode,
+      notes: reviewerNotes,
+    });
+  }, [pairData?.pair, voteMutation, scoring.mode, expertSelectedCode, reviewerNotes]);
+
+  const submitExclusionVote = useCallback((excluded: string[]) => {
+    if (!pairData?.pair) return;
+    voteMutation.mutate({
+      pairId: pairData.pair.id,
+      scoreBinary: null,
+      scoreNumeric: null,
+      scorePartition: null,
+      scoreExclusion: { excluded },
       scoringMode: scoring.mode,
       expertCode: expertSelectedCode,
       notes: reviewerNotes,
@@ -475,6 +625,14 @@ export default function ReviewPage() {
     else submitPartitionVote(groups);
   }, [pairData?.pair, confirmBeforeSubmit, submitPartitionVote]);
 
+  const handleExclusionSubmit = useCallback(() => {
+    if (!pairData?.pair) return;
+    // Read the lifted selection at submit time (the checkboxes live in the left entity card).
+    const excluded = exclusionMembers.filter((m) => exclusionFlagged[m.id]).map((m) => m.id);
+    if (confirmBeforeSubmit) setPendingVote({ type: 'exclusion', value: excluded });
+    else submitExclusionVote(excluded);
+  }, [pairData?.pair, confirmBeforeSubmit, submitExclusionVote, exclusionMembers, exclusionFlagged]);
+
   const handleSkip = useCallback(() => {
     if (!pairData?.pair) return;
     if (confirmBeforeSubmit) setPendingSkip(true);
@@ -489,9 +647,10 @@ export default function ReviewPage() {
     if (!pendingVote || !pairData?.pair) return;
     if (pendingVote.type === 'binary') submitBinaryVote(pendingVote.value);
     else if (pendingVote.type === 'numeric') submitNumericVote(pendingVote.value);
-    else submitPartitionVote(pendingVote.value);
+    else if (pendingVote.type === 'partition') submitPartitionVote(pendingVote.value);
+    else submitExclusionVote(pendingVote.value);
     setPendingVote(null);
-  }, [pendingVote, pairData?.pair, submitBinaryVote, submitNumericVote, submitPartitionVote]);
+  }, [pendingVote, pairData?.pair, submitBinaryVote, submitNumericVote, submitPartitionVote, submitExclusionVote]);
 
   const confirmSkip = useCallback(() => {
     if (!pairData?.pair) return;
@@ -563,7 +722,7 @@ export default function ReviewPage() {
           return;
         }
       }
-      // Partition mode: no single-key vote shortcut (grouping is multi-step); only Skip (below).
+      // Partition and exclusion modes: no single-key vote shortcut (selection is multi-step); only Skip (below).
 
       // Skip works in both modes
       if (e.key === "ArrowDown") {
@@ -708,24 +867,48 @@ export default function ReviewPage() {
               </Accordion>
             )}
 
-            {/* Entity comparison */}
+            {/* Entity comparison. Exclusion mode swaps the LEFT card for the member checklist
+                (the approved two-column layout); the RIGHT card stays the anchor (targetText),
+                its badge labeled from targetDataset. All other modes are unchanged. */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <EntityCard
-                type="source"
-                text={pairData.pair.sourceText}
-                dataset={pairData.pair.sourceDataset}
-                id={pairData.pair.sourceId}
-                metadata={pairData.pair.sourceMetadata as Record<string, unknown> | null}
-                display={display}
-              />
-              <EntityCard
-                type="target"
-                text={pairData.pair.targetText}
-                dataset={pairData.pair.targetDataset}
-                id={pairData.pair.targetId}
-                metadata={pairData.pair.targetMetadata as Record<string, unknown> | null}
-                display={display}
-              />
+              {scoring.mode === "exclusion" ? (
+                <>
+                  <ExclusionMembersCard
+                    members={exclusionMembers}
+                    flagged={exclusionFlagged}
+                    onToggle={toggleExclusion}
+                    disabled={isSubmitting}
+                  />
+                  <EntityCard
+                    type="target"
+                    text={pairData.pair.targetText}
+                    dataset={pairData.pair.targetDataset}
+                    id={pairData.pair.targetId}
+                    metadata={pairData.pair.targetMetadata as Record<string, unknown> | null}
+                    display={display}
+                    badgeLabel={anchorBadgeLabel(pairData.pair.targetDataset)}
+                  />
+                </>
+              ) : (
+                <>
+                  <EntityCard
+                    type="source"
+                    text={pairData.pair.sourceText}
+                    dataset={pairData.pair.sourceDataset}
+                    id={pairData.pair.sourceId}
+                    metadata={pairData.pair.sourceMetadata as Record<string, unknown> | null}
+                    display={display}
+                  />
+                  <EntityCard
+                    type="target"
+                    text={pairData.pair.targetText}
+                    dataset={pairData.pair.targetDataset}
+                    id={pairData.pair.targetId}
+                    metadata={pairData.pair.targetMetadata as Record<string, unknown> | null}
+                    display={display}
+                  />
+                </>
+              )}
             </div>
 
             {/* Collapsible context panels (LLM reasoning stays below the cards
@@ -843,7 +1026,7 @@ export default function ReviewPage() {
 
             <Separator />
 
-            {/* Voting controls (config-driven: binary or numeric) */}
+            {/* Voting controls (config-driven: binary, numeric, partition, or exclusion) */}
             <div className="space-y-4">
               <ScoringControls
                 // Remount per pair so in-progress control state (e.g. a partition grouping)
@@ -857,6 +1040,9 @@ export default function ReviewPage() {
                 onNumericSelect={handleNumericVote}
                 members={partitionMembers}
                 onPartitionSelect={handlePartitionVote}
+                exclusionMemberCount={exclusionMembers.length}
+                exclusionExcludedCount={exclusionExcludedIds.length}
+                onExclusionSubmit={handleExclusionSubmit}
               />
 
               <div className="flex justify-center">
@@ -919,6 +1105,10 @@ export default function ReviewPage() {
                         ? (pendingVote.value.length === 1
                             ? 'One concept'
                             : `Over-merge — ${pendingVote.value.length} concepts`)
+                      : pendingVote?.type === 'exclusion'
+                        ? (pendingVote.value.length === 0
+                            ? 'One concept'
+                            : `Over-merge — ${pendingVote.value.length} flagged`)
                         : ''}
                 </p>
                 <p className="text-sm text-muted-foreground">
