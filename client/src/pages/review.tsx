@@ -846,6 +846,9 @@ export default function ReviewPage() {
             {/* Voting controls (config-driven: binary or numeric) */}
             <div className="space-y-4">
               <ScoringControls
+                // Remount per pair so in-progress control state (e.g. a partition grouping)
+                // never carries over to the next pair, even when member ids are identical.
+                key={pairData?.pair?.id}
                 scoring={scoring}
                 isSubmitting={isSubmitting}
                 binaryValue={pendingVote?.type === "binary" ? pendingVote.value : null}
