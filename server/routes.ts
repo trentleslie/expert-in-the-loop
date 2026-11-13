@@ -18,6 +18,8 @@ import { resolveMigrationEmail } from "./authMigration";
 import { isCampaignJoinable } from "./campaignMembership";
 import { insertCampaignSchema, insertVoteSchema, updateCampaignDetailsSchema, type InsertPair, type Campaign } from "@shared/schema";
 import { RESOLUTION_LAYER_VALUES, campaignConfigSchema } from "@shared/campaignConfig";
+import { parseMembers } from "@shared/members";
+import { validatePartitionGroups } from "@shared/partitionVote";
 import { z } from "zod";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -654,19 +656,18 @@ export async function registerRoutes(
         return res.status(400).json({ message: "This campaign uses numeric scoring; provide scoreNumeric only." });
       }
       if (mode === "partition") {
-        const p = req.body.scorePartition;
-        const wellFormed =
-          p != null &&
-          Array.isArray(p.groups) &&
-          p.groups.length > 0 &&
-          p.groups.every(
-            (g: unknown) => Array.isArray(g) && g.every((m) => typeof m === "string"),
-          );
-        if (req.body.scoreBinary != null || req.body.scoreNumeric != null || !wellFormed) {
-          return res.status(400).json({
-            message:
-              "This campaign uses partition scoring; provide scorePartition.groups (a non-empty grouping of member ids) only.",
-          });
+        if (req.body.scoreBinary != null || req.body.scoreNumeric != null) {
+          return res.status(400).json({ message: "This campaign uses partition scoring; provide scorePartition only." });
+        }
+        // The grouping must be a true partition of THIS pair's members — consensus classifies the
+        // vote by group count alone and the export emits the ids verbatim.
+        const problem = validatePartitionGroups(
+          req.body.scorePartition?.groups,
+          parseMembers(pair.sourceMetadata).map((m) => m.id),
+          config.scoring.partition.maxGroups,
+        );
+        if (problem) {
+          return res.status(400).json({ message: `Invalid scorePartition.groups: ${problem}.` });
         }
       }
 
@@ -675,7 +676,7 @@ export async function registerRoutes(
         userId,
         scoreBinary: mode === "binary" ? req.body.scoreBinary : null,
         scoreNumeric: mode === "numeric" ? req.body.scoreNumeric : null,
-        scorePartition: mode === "partition" ? req.body.scorePartition : null,
+        scorePartition: mode === "partition" ? { groups: req.body.scorePartition.groups } : null,
         scoringMode: mode,
         expertSelectedCode: req.body.expertSelectedCode ?? null,
         reviewerNotes: req.body.reviewerNotes ?? null,

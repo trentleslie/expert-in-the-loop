@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -48,6 +48,7 @@ import {
 import type { Campaign, Pair } from "@shared/schema";
 import type { CampaignConfig } from "@shared/campaignConfig";
 import { DEFAULT_CAMPAIGN_CONFIG } from "@shared/campaignConfig";
+import { parseMembers } from "@shared/members";
 
 type NextPairResponse = {
   pair: Pair | null;
@@ -327,11 +328,9 @@ export default function ReviewPage() {
   });
 
   // Partition mode: the member variables to group live in the pair's sourceMetadata.members.
-  const partitionMembers: { id: string; text: string }[] = Array.isArray(
-    (pairData?.pair?.sourceMetadata as { members?: unknown } | null)?.members,
-  )
-    ? (pairData!.pair!.sourceMetadata as { members: { id: string; text: string }[] }).members
-    : [];
+  // Memoized on the metadata object so the array identity is stable across rerenders.
+  const pairSourceMetadata = pairData?.pair?.sourceMetadata;
+  const partitionMembers = useMemo(() => parseMembers(pairSourceMetadata), [pairSourceMetadata]);
 
   const voteMutation = useMutation({
     mutationFn: async ({ pairId, scoreBinary, scoreNumeric, scorePartition, expertCode, notes, scoringMode }: {

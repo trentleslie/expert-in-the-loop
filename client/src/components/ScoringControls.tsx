@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { ThumbsUp, ThumbsDown, HelpCircle, Loader2 } from "lucide-react";
 import type { CampaignConfig } from "@shared/campaignConfig";
+import type { PairMember } from "@shared/members";
 
 /**
  * Config-driven scoring controls for the review UI.
@@ -18,7 +19,7 @@ export type BinaryValue = "match" | "no_match" | "unsure";
 type ScoringConfig = CampaignConfig["scoring"];
 
 /** A member variable the reviewer partitions into a concept group (partition mode). */
-export type PartitionMember = { id: string; text: string };
+export type PartitionMember = PairMember;
 
 type ScoringControlsProps = {
   scoring: ScoringConfig;
@@ -215,9 +216,13 @@ function PartitionControls({
 }) {
   // member id -> group index (0-based). Default: all in group 0 ⇒ "one concept" (coherent).
   const [assign, setAssign] = useState<Record<string, number>>({});
+  // Reset only when the SET of members changes (a new pair), never on a parent rerender: keying
+  // on the array identity would wipe the reviewer's grouping every time the page rerenders.
+  const memberKey = JSON.stringify(members.map((m) => m.id));
   useEffect(() => {
     setAssign(Object.fromEntries(members.map((m) => [m.id, 0])));
-  }, [members]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [memberKey]);
 
   if (members.length === 0) {
     return (
