@@ -23,9 +23,11 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient as qc } from "@/lib/queryClient";
-import { binaryVoteLabel, numericVoteLabel } from "@/lib/scoringLabels";
+import { Checkbox } from "@/components/ui/checkbox";
+import { binaryVoteLabel, exclusionVoteLabel, numericVoteLabel } from "@/lib/scoringLabels";
 import { ScoringControls } from "@/components/ScoringControls";
 import type { CampaignConfig } from "@shared/campaignConfig";
+import { parseMembers } from "@shared/members";
 import {
   ArrowLeft,
   ThumbsUp,
@@ -88,6 +90,8 @@ function VoteCard({
                     {binaryVoteLabel(scoring, "no_match")}
                   </Badge>
                 )
+              ) : vote.scoringMode === "exclusion" ? (
+                <Badge variant="secondary">{exclusionVoteLabel(vote.scoreExclusion?.excluded)}</Badge>
               ) : (
                 <Badge variant="secondary">
                   Score: {vote.scoreNumeric != null ? numericVoteLabel(scoring, vote.scoreNumeric) : "—"}
@@ -177,7 +181,7 @@ function EditVoteDialog({
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [scoringMode, setScoringMode] = useState<"binary" | "numeric">(
+  const [scoringMode, setScoringMode] = useState<"binary" | "numeric" | "exclusion">(
     vote?.scoringMode || "binary"
   );
   const [scoreBinary, setScoreBinary] = useState<"match" | "no_match" | "unsure" | null>(
@@ -187,6 +191,13 @@ function EditVoteDialog({
     vote?.scoreNumeric ?? null
   );
   const [reviewerNotes, setReviewerNotes] = useState(vote?.reviewerNotes || "");
+  // Exclusion mode: the pair's members and which of them this correction flags.
+  const exclusionMembers = useMemo(() => parseMembers(vote?.pair.sourceMetadata), [vote?.pair.sourceMetadata]);
+  const [excluded, setExcluded] = useState<string[]>(vote?.scoreExclusion?.excluded ?? []);
+  // Only ids that are still members of the pair are shown and submitted.
+  const excludedIds = exclusionMembers.filter((m) => excluded.includes(m.id)).map((m) => m.id);
+  const toggleExcluded = (id: string) =>
+    setExcluded((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
 
   // Sync state when the vote prop changes (e.g. user opens a different vote for editing)
   useEffect(() => {
@@ -195,6 +206,7 @@ function EditVoteDialog({
       setScoreBinary(vote.scoreBinary ?? null);
       setScoreNumeric(vote.scoreNumeric ?? null);
       setReviewerNotes(vote.reviewerNotes || "");
+      setExcluded(vote.scoreExclusion?.excluded ?? []);
     }
   }, [vote?.id]);
 
@@ -205,6 +217,7 @@ function EditVoteDialog({
         scoringMode,
         scoreBinary: scoringMode === "binary" ? scoreBinary : null,
         scoreNumeric: scoringMode === "numeric" ? scoreNumeric : null,
+        scoreExclusion: scoringMode === "exclusion" ? { excluded: excludedIds } : null,
         reviewerNotes: reviewerNotes || null,
       });
     },
@@ -286,6 +299,43 @@ function EditVoteDialog({
                 </Button>
               </div>
             </div>
+          ) : scoringMode === "exclusion" ? (
+            <div className="space-y-2">
+              <Label>Variables that do NOT belong</Label>
+              {exclusionMembers.length === 0 ? (
+                <p className="text-sm text-muted-foreground" data-testid="edit-exclusion-no-members">
+                  This pair has no member variables to review.
+                </p>
+              ) : (
+                <div className="space-y-2 overflow-y-auto max-h-[40vh]">
+                  {exclusionMembers.map((m) => {
+                    const isFlagged = excludedIds.includes(m.id);
+                    return (
+                      <label
+                        key={m.id}
+                        className={`flex items-start gap-3 rounded-md border p-2 cursor-pointer ${
+                          isFlagged ? "border-destructive bg-destructive/5" : "border-border"
+                        }`}
+                        data-testid={`edit-exclusion-member-${m.id}`}
+                      >
+                        <Checkbox
+                          checked={isFlagged}
+                          onCheckedChange={() => toggleExcluded(m.id)}
+                          className="mt-0.5 shrink-0"
+                          data-testid={`edit-exclusion-checkbox-${m.id}`}
+                        />
+                        <span className={`text-sm leading-snug ${isFlagged ? "line-through text-destructive" : ""}`}>
+                          {m.text}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="text-sm text-muted-foreground" data-testid="edit-exclusion-verdict">
+                {exclusionVoteLabel(excludedIds)}
+              </p>
+            </div>
           ) : (
             <div className="space-y-2">
               <Label>Your Score</Label>
@@ -334,7 +384,7 @@ function EditVoteDialog({
           </Button>
           <Button
             onClick={() => updateMutation.mutate()}
-            disabled={updateMutation.isPending}
+            disabled={updateMutation.isPending || (scoringMode === "exclusion" && exclusionMembers.length === 0)}
             data-testid="button-save-vote"
           >
             {updateMutation.isPending ? "Saving..." : "Save Changes"}

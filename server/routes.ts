@@ -18,6 +18,8 @@ import { resolveMigrationEmail } from "./authMigration";
 import { isCampaignJoinable } from "./campaignMembership";
 import { insertCampaignSchema, insertVoteSchema, updateCampaignDetailsSchema, type InsertPair, type Campaign } from "@shared/schema";
 import { RESOLUTION_LAYER_VALUES, campaignConfigSchema } from "@shared/campaignConfig";
+import { parseMembers } from "@shared/members";
+import { validateExcludedMembers } from "@shared/exclusionVote";
 import { z } from "zod";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -653,12 +655,27 @@ export async function registerRoutes(
       if (mode === "numeric" && (req.body.scoreNumeric == null || req.body.scoreBinary != null)) {
         return res.status(400).json({ message: "This campaign uses numeric scoring; provide scoreNumeric only." });
       }
+      if (mode === "exclusion") {
+        if (req.body.scoreBinary != null || req.body.scoreNumeric != null) {
+          return res.status(400).json({ message: "This campaign uses exclusion scoring; provide scoreExclusion only." });
+        }
+        // Flagged ids must be unique members of THIS pair (the array may be empty: nothing
+        // flagged = coherent) — they are stored verbatim and surface in history and exports.
+        const problem = validateExcludedMembers(
+          req.body.scoreExclusion?.excluded,
+          parseMembers(pair.sourceMetadata).map((m) => m.id),
+        );
+        if (problem) {
+          return res.status(400).json({ message: `Invalid scoreExclusion.excluded: ${problem}.` });
+        }
+      }
 
       const voteData = insertVoteSchema.parse({
         pairId,
         userId,
         scoreBinary: mode === "binary" ? req.body.scoreBinary : null,
         scoreNumeric: mode === "numeric" ? req.body.scoreNumeric : null,
+        scoreExclusion: mode === "exclusion" ? { excluded: req.body.scoreExclusion.excluded } : null,
         scoringMode: mode,
         expertSelectedCode: req.body.expertSelectedCode ?? null,
         reviewerNotes: req.body.reviewerNotes ?? null,
